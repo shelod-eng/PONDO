@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { PondoDemoNav } from "@/components/PondoDemoNav";
 import { fetchDemoProducts, type DemoProduct } from "@/lib/api";
+import { FALLBACK_IMAGE, FALLBACK_PRODUCTS, IMAGE_BY_PRODUCT } from "@/lib/demoCatalog";
 import { usePondoCart } from "@/lib/pondoCart";
 
 function money(cents: number) {
@@ -22,10 +23,19 @@ export default function CartPage() {
   useEffect(() => {
     fetchDemoProducts()
       .then((out) => setProducts(out.items))
-      .catch((e) => setError(e instanceof Error ? e.message : "load_failed"));
+      .catch((e) => {
+        setProducts(FALLBACK_PRODUCTS);
+        setError(e instanceof Error ? e.message : "load_failed");
+      });
   }, []);
 
-  const byId = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+  const byId = useMemo(() => {
+    const runtime = new Map(products.map((p) => [p.id, p]));
+    for (const p of FALLBACK_PRODUCTS) {
+      if (!runtime.has(p.id)) runtime.set(p.id, p);
+    }
+    return runtime;
+  }, [products]);
 
   const lines = useMemo(() => {
     return cart.items
@@ -42,99 +52,112 @@ export default function CartPage() {
   const deliveryCents = subtotal > 150000 ? 0 : lines.length ? 5990 : 0;
   const total = subtotal + deliveryCents;
 
+  const recommended = useMemo(() => {
+    const inCart = new Set(lines.map((l) => l.product.id));
+    return FALLBACK_PRODUCTS.filter((p) => !inCart.has(p.id)).slice(0, 3);
+  }, [lines]);
+
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className="min-h-screen bg-[#f1f3f7] text-[var(--pondo-navy-900)]">
       <PondoDemoNav />
-      <div className="mx-auto max-w-6xl px-6 py-8">
+
+      <div className="mx-auto max-w-[1240px] px-4 py-6">
         <div className="flex items-end justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Cart</h1>
-            <p className="mt-2 text-sm text-white/60">Review items, quantities, and proceed to checkout.</p>
+            <h1 className="text-5xl font-black tracking-tight">Cart</h1>
+            <p className="mt-2 text-sm text-slate-600">Review items, adjust quantities, and continue to secure checkout.</p>
           </div>
-          <Link
-            href="/PondoDemo/checkout"
-            className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-white/90"
-          >
+          <Link href="/PondoDemo/checkout" className="rounded-xl bg-[var(--pondo-orange-500)] px-6 py-3 text-sm font-bold text-white hover:bg-[var(--pondo-orange-400)]">
             Checkout
           </Link>
         </div>
 
-        {error ? <div className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{error}</div> : null}
+        {error ? <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">API unstable, cart is running in sandbox mode.</div> : null}
 
-        <div className="mt-6 grid gap-4 lg:grid-cols-3">
-          <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-white/5 p-6">
+        <div className="mt-6 grid gap-4 lg:grid-cols-[2fr_1fr]">
+          <section className="rounded-2xl border border-[var(--pondo-line)] bg-white p-5 shadow-sm">
             {lines.length === 0 ? (
-              <div className="text-sm text-white/60">
-                Your cart is empty.{" "}
-                <Link href="/PondoDemo/shop" className="font-semibold text-white hover:underline">
-                  Continue shopping
+              <div className="rounded-xl border border-dashed border-[var(--pondo-line)] bg-[#fafcff] p-8 text-center">
+                <div className="text-lg font-bold">Your cart is empty.</div>
+                <p className="mt-2 text-sm text-slate-600">Add products from shop to continue.</p>
+                <Link href="/PondoDemo/shop" className="mt-4 inline-flex rounded-lg bg-[var(--pondo-navy-900)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--pondo-navy-800)]">
+                  Back to Shop
                 </Link>
-                .
               </div>
             ) : (
-              <div className="divide-y divide-white/10">
-                {lines.map((l) => (
-                  <div key={l.product.id} className="flex items-center justify-between gap-4 py-4">
-                    <div>
-                      <div className="text-xs text-white/60">{l.product.brand}</div>
-                      <div className="mt-1 text-sm font-semibold">{l.product.name}</div>
-                      <div className="mt-2 text-xs text-white/50">
-                        Unit: {money(l.unitCents)} • Stock: {l.product.stock}
+              <div className="space-y-4">
+                {lines.map((l) => {
+                  const image = IMAGE_BY_PRODUCT[l.product.id] || FALLBACK_IMAGE;
+                  return (
+                    <article key={l.product.id} className="grid items-center gap-3 rounded-xl border border-[var(--pondo-line)] bg-[#fbfdff] p-3 sm:grid-cols-[120px_1fr_auto_auto]">
+                      <div className="h-24 overflow-hidden rounded-lg bg-slate-100" style={{ backgroundImage: `url(${image})`, backgroundSize: "cover", backgroundPosition: "center" }} />
+
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{l.product.brand}</div>
+                        <div className="mt-1 text-2xl font-bold leading-tight">{l.product.name}</div>
+                        <div className="mt-2 text-xs text-slate-600">Unit: {money(l.unitCents)} | Stock: {l.product.stock}</div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="number"
-                        min={1}
-                        max={99}
-                        value={l.item.qty}
-                        onChange={(e) => cart.setQty(l.item.productId, Number(e.target.value))}
-                        className="w-20 rounded-xl bg-black/30 px-3 py-2 text-sm outline-none ring-1 ring-white/10 focus:ring-white/30"
-                      />
-                      <div className="w-28 text-right text-sm font-semibold">{money(l.lineCents)}</div>
-                      <button
-                        onClick={() => cart.remove(l.item.productId)}
-                        className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ))}
+
+                      <div className="flex items-center rounded-lg border border-[var(--pondo-line)] bg-white">
+                        <button onClick={() => cart.setQty(l.item.productId, Math.max(1, l.item.qty - 1))} className="px-3 py-2 text-sm font-bold text-[var(--pondo-navy-800)]">-</button>
+                        <div className="min-w-10 px-2 text-center text-sm font-semibold">{l.item.qty}</div>
+                        <button onClick={() => cart.setQty(l.item.productId, l.item.qty + 1)} className="px-3 py-2 text-sm font-bold text-[var(--pondo-navy-800)]">+</button>
+                      </div>
+
+                      <div className="text-right">
+                        <div className="text-2xl font-black text-[var(--pondo-navy-900)]">{money(l.lineCents)}</div>
+                        <button onClick={() => cart.remove(l.item.productId)} className="mt-2 rounded-lg border border-[var(--pondo-line)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--pondo-navy-800)] hover:bg-[#e9f0ff]">
+                          Remove
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             )}
-          </div>
+          </section>
 
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-            <div className="text-xs text-white/60">Order summary</div>
+          <aside className="rounded-2xl border border-[var(--pondo-line)] bg-white p-5 shadow-sm">
+            <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Order Summary</div>
             <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-              <div className="text-white/60">Subtotal</div>
+              <div className="text-slate-600">Subtotal</div>
               <div className="text-right font-semibold">{money(subtotal)}</div>
-              <div className="text-white/60">Delivery</div>
+              <div className="text-slate-600">Delivery</div>
               <div className="text-right font-semibold">{money(deliveryCents)}</div>
-              <div className="text-white/60">Total</div>
-              <div className="text-right text-lg font-semibold">{money(total)}</div>
+              <div className="text-slate-600">Total</div>
+              <div className="text-right text-3xl font-black text-[var(--pondo-navy-900)]">{money(total)}</div>
             </div>
-            <div className="mt-5 text-xs text-white/50">Free delivery over R1,500.00.</div>
+            <div className="mt-4 text-xs text-slate-500">Free delivery over R1,500.00.</div>
 
-            <div className="mt-6 flex flex-col gap-2">
-              <Link
-                href="/PondoDemo/checkout"
-                className="rounded-xl bg-white px-4 py-2 text-center text-sm font-semibold text-slate-950 hover:bg-white/90"
-              >
+            <div className="mt-5 grid gap-2">
+              <Link href="/PondoDemo/checkout" className="rounded-xl bg-[var(--pondo-orange-500)] px-4 py-3 text-center text-sm font-bold text-white hover:bg-[var(--pondo-orange-400)]">
                 Proceed to checkout
               </Link>
-              <button
-                onClick={cart.clear}
-                className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
-              >
+              <button onClick={cart.clear} className="rounded-xl border border-[var(--pondo-line)] bg-white px-4 py-2 text-sm font-semibold text-[var(--pondo-navy-800)] hover:bg-[#eef3ff]">
                 Clear cart
               </button>
             </div>
-          </div>
+          </aside>
         </div>
+
+        {recommended.length > 0 ? (
+          <section className="mt-6 rounded-2xl border border-[var(--pondo-line)] bg-white p-5 shadow-sm">
+            <h2 className="text-xl font-black">Recommended for you</h2>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              {recommended.map((p) => (
+                <div key={p.id} className="rounded-xl border border-[var(--pondo-line)] bg-[#fbfdff] p-3">
+                  <div className="text-sm font-semibold">{p.name}</div>
+                  <div className="mt-1 text-xs text-slate-600">{p.brand}</div>
+                  <div className="mt-2 text-lg font-black text-[var(--pondo-orange-500)]">{money(discountedPrice(p))}</div>
+                  <button onClick={() => cart.add(p.id, 1)} className="mt-2 rounded-lg bg-[var(--pondo-navy-900)] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[var(--pondo-navy-800)]">
+                    Add item
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
       </div>
     </div>
   );
 }
-

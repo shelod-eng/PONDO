@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const paymentMethods = ["card", "eft", "pos", "speedpoint", "bnpl", "loyalty"];
+export const paymentMethods = ["card"];
 export const gateways = ["peach", "payfast", "ozow", "payflex", "speedpoint"];
 
 export const initiateSchema = z.object({
@@ -19,4 +19,3 @@ export const creditVetSchema = z.object({
 export const paySchema = z.object({
   method: z.enum(paymentMethods),
 });
-

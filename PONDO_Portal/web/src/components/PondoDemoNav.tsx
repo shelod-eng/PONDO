@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -12,8 +12,8 @@ function NavLink({ href, label }: { href: string; label: string }) {
     <Link
       href={href}
       className={[
-        "rounded-lg px-3 py-2 text-sm font-medium",
-        active ? "bg-white text-slate-950" : "text-white/80 hover:bg-white/10 hover:text-white",
+        "rounded-lg px-3 py-2 text-sm font-semibold transition",
+        active ? "bg-[var(--pondo-orange-500)] text-white shadow-sm" : "text-slate-100 hover:bg-white/10 hover:text-white",
       ].join(" ")}
     >
       {label}
@@ -22,37 +22,38 @@ function NavLink({ href, label }: { href: string; label: string }) {
 }
 
 export function PondoDemoNav() {
-  const { auth, logout } = useAuth();
+  const { auth, logout, hydrated } = useAuth();
   const cart = usePondoCart();
-  const safeCount = cart.hydrated ? cart.count : 0;
+  const cartCount = cart.hydrated ? cart.count : 0;
 
   return (
-    <div className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/70 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
-        <Link href="/PondoDemo/shop" className="text-sm font-semibold tracking-wide text-white">
-          PONDO Shop
+    <div className="sticky top-0 z-20 border-b border-[#314a7d] bg-[var(--pondo-navy-900)] backdrop-blur">
+      <div className="mx-auto flex max-w-[1240px] items-center justify-between px-6 py-3">
+        <Link href="/PondoDemo/shop" className="text-sm font-extrabold tracking-wide text-white">
+          PONDO <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#f0b082]">Trust Commerce</span>
         </Link>
         <div className="flex items-center gap-2">
           <NavLink href="/PondoDemo/shop" label="Shop" />
-          <NavLink href="/PondoDemo/cart" label={`Cart (${safeCount})`} />
-          <NavLink href="/PondoDemo/checkout" label="Checkout" />
+          <NavLink href="/PondoDemo/cart" label={`Cart (${cartCount})`} />
           <NavLink href="/PondoDemo/sponsor" label="Sponsor" />
         </div>
         <div className="flex items-center gap-3">
-          {auth ? (
+          {!hydrated ? (
+            <div className="text-xs text-slate-200/70">Loading session...</div>
+          ) : auth ? (
             <>
-              <div className="text-xs text-white/60">
-                {auth.username} • {auth.role}
+              <div className="text-xs text-slate-200/85">
+                {auth.username} - {auth.role}
               </div>
               <button
                 onClick={logout}
-                className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/10"
+                className="rounded-lg border border-white/40 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20"
               >
                 Log out
               </button>
             </>
           ) : (
-            <div className="text-xs text-white/50">Not logged in</div>
+            <div className="text-xs text-slate-200/70">Not logged in</div>
           )}
         </div>
       </div>

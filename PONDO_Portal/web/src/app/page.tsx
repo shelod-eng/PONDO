@@ -5,7 +5,7 @@ export default function Home() {
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-950 to-slate-900 text-white">
       <div className="mx-auto max-w-5xl px-6 py-14">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-10">
-          <div className="text-xs tracking-widest text-white/70">PONDO • Demo Portal</div>
+          <div className="text-xs tracking-widest text-white/70">PONDO - Demo Portal</div>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight">Unified Checkout + Sponsor Portal</h1>
           <p className="mt-4 max-w-3xl text-white/70">
             Demo implementation based on <span className="font-medium text-white">PONDO-TRD-001 v1.0 (April 2026)</span>:
@@ -49,7 +49,7 @@ export default function Home() {
         </div>
 
         <div className="mt-8 text-xs text-white/50">
-          Tip: start the API on <span className="font-mono">http://localhost:4000</span> and set{" "}
+          Tip: start the API on <span className="font-mono">http://localhost:4100</span> and set{" "}
           <span className="font-mono">NEXT_PUBLIC_API_BASE_URL</span> if needed.
         </div>
       </div>

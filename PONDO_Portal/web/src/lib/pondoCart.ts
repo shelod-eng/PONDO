@@ -29,6 +29,8 @@ export function usePondoCart() {
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
+    // Hydrate cart from localStorage only on client to avoid SSR/client text mismatches.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setItems(readCart());
     setHydrated(true);
   }, []);

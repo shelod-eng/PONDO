@@ -1,5 +1,15 @@
 export const demoProducts = [
   {
+    id: "samsung-65-qled",
+    brand: "Samsung",
+    name: "65\" QLED 4K Smart TV",
+    category: "Electronics",
+    priceCents: 1899900,
+    discountPct: 0,
+    rating: 4.8,
+    stock: 16,
+  },
+  {
     id: "samsung-s24",
     brand: "Samsung",
     name: "Galaxy S24 Ultra (256GB)",
@@ -128,4 +138,3 @@ export function getCategories() {
 export function findProduct(id) {
   return demoProducts.find((p) => p.id === id) || null;
 }
-

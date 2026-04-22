@@ -1,0 +1,255 @@
+
+
+===== PAGE 1 =====
+
+1. SYSTEM OVERVIEW
+Platform Name PONDO — Trust Commerce
+Classification Trusted Payment Checkout Layer for eCommerce Platforms
+Target Partners Amazon, Temu, Takealot, WooCommerce, Shopify
+Target Market South African consumers who distrust standard online payments
+Core Value Prop KYC + ITC checks + affordability vetting + fraud detection before checkout clearance
+Document Version 1.0 — Sponsor-Ready
+Prepared By PONDO Engineering Team
+Date April 2026
+2. TECHNOLOGY STACK
+FRONTEND
+Next.js 14 (React 18)
+SSR, SEO, App Router, middleware support
+BACKEND API
+Node.js + Express / Fastify
+API orchestration, integrations, webhooks
+FRAUD DETECTION
+Python 3.11 + scikit-learn
+ML anomaly detection, data encryption microservice
+DATABASE
+PostgreSQL (Supabase)
+ACID compliance, RLS policies, realtime subscriptions
+MESSAGING
+Twilio (SMS) + SendGrid (Email)
+OTP delivery, notification triggers
+KYC / ITC
+TransUnion / Experian API
+Credit checks, identity verification, affordability
+DEPLOYMENT
+Vercel (FE) + Supabase (BE+DB)
+Edge network, CI/CD via GitHub Actions
+IDE / DEV
+VSCode + PyCharm
+Full-stack + Python microservice development
+PONDO
+TRUST COMMERCE · TRUSTED PAYMENT CHECKOUT
+Technical Specification Document — Sponsor-Ready · Audit-Proof
+v1.0 DRAFT
+April 2026
+Confidential
+⛓  Amazon
+ ⛓  Temu
+ ⛓  Takealot
+ ⛓  WooCommerce
+ ⛓  Shopify
+
+===== PAGE 2 =====
+
+3. THE 5-STEP TRUST-LOCKED PAYMENT JOURNEY
+1 Press Buy
+Initiates payment journey via PONDO checkout
+▸API call fetches customer + product data from partner
+eCommerce (Amazon, Temu, Takealot)
+▸Embedded video explainer for first-time users
+▸Customer redirected from partner site to PONDO secure
+checkout
+▸Session token issued, cart data encrypted and stored in
+Postgres
+2 Confirm Details
+Identity confirmation & OTP verification
+▸Auto-populate: Full Name, SA ID Number, Address, Email,
+Geo-location
+▸OTP sent via Twilio (SMS) or SendGrid (Email) — 5-min
+expiry
+▸Mandatory T&C checkbox — transaction cannot proceed
+without acceptance
+▸POPIA-compliant data capture, AES-256 encrypted at rest
+3 Quick Credit & KYC
+Third-party identity & affordability checks
+▸TransUnion / Experian API: ITC credit check, bureau score
+pull
+▸KYC: ID scan + face-match verification (third-party
+biometric service)
+▸Affordability vetting: income vs. purchase cost algorithm
+▸Fraud scoring via Python ML microservice (anomaly
+detection)
+4 Confirm Route
+Cost-sharing & final T&C finalisation
+▸Define payment split: merchant absorbs X%, customer
+pays Y%
+▸Display final transaction cost, shipping, and delivery
+method
+▸Final T&C acceptance signature captured
+▸PED (Payment Enabled Delivery) route assigned to KYC-
+cleared driver
+5 Completed — Transaction Cleared
+Fulfillment handoff & PED delivery loop
+▸Transaction cleared status posted to Postgres + partner eCommerce webhook
+▸PED Device (Yoco/SoftPOS) assigned to vetted courier for field delivery
+▸Vetted Custody: KYC-cleared drivers, digital or physical cash handover tracked
+▸Centralized Return Protocol: PED device returned to hub at end of shift to close operational loop
+▸Customer notification (SMS + email): "Your order is on its way — PONDO Verified"
+
+===== PAGE 3 =====
+
+4. POSTGRESQL DATABASE SCHEMA (SUPABASE)
+-- Users / Customers
+CREATE TABLE pondo_users (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  full_name   TEXT NOT NULL,
+  id_number   TEXT UNIQUE NOT NULL,          -- SA ID — encrypted
+  email       TEXT UNIQUE NOT NULL,
+  phone       TEXT,
+  address     TEXT,
+  geo_lat     DECIMAL, geo_lon DECIMAL,
+  affordability_score DECIMAL DEFAULT 0,
+  kyc_status  TEXT DEFAULT 'pending',        -- pending | verified | failed
+  itc_status  TEXT DEFAULT 'pending',
+  tc_accepted BOOLEAN DEFAULT FALSE,
+  created_at  TIMESTAMPTZ DEFAULT now()
+);
+-- Orders / Transactions
+CREATE TABLE pondo_orders (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         UUID REFERENCES pondo_users(id),
+  partner_site    TEXT,                      -- amazon | temu | takealot
+  product_id      TEXT, product_name TEXT, amount DECIMAL,
+  merchant_share  DECIMAL, customer_share DECIMAL,
+  step            INT DEFAULT 1,             -- 1-5 journey tracker
+  status          TEXT DEFAULT 'initiated',  -- initiated | pending | cleared | failed
+  otp_verified    BOOLEAN DEFAULT FALSE,
+  fraud_score     DECIMAL DEFAULT 0,
+  ped_driver_id   UUID,
+  created_at      TIMESTAMPTZ DEFAULT now()
+);
+-- Audit Log (POPIA compliance)
+CREATE TABLE pondo_audit_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID, order_id UUID, action TEXT,
+  metadata JSONB, ip_address TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+===== PAGE 4 =====
+
+5. API SPECIFICATION (NODE.JS / NEXT.JS ROUTE HANDLERS)
+Endpoint Method Description Auth
+/api/pondo/fetch-cart POST Fetch product + customer from
+partner eCommerce API
+API Key
+/api/pondo/register POST Register new customer, store in
+Postgres
+Public
+/api/pondo/send-otp POST Send OTP via Twilio/SendGrid Session
+/api/pondo/verify-otp POST Validate OTP, mark session verifiedSession
+/api/pondo/kyc-check POST Run KYC + ITC via
+TransUnion/Experian
+Session + JWT
+/api/pondo/fraud-score POST Call Python ML microservice for
+fraud scoring
+Internal
+/api/pondo/confirm-route POST Set cost-split, assign PED driverJWT
+/api/pondo/complete POST Mark transaction cleared, fire
+webhooks
+JWT
+/api/pondo/orders GET List user orders with status JWT
+/api/pondo/audit GET Admin: full audit trail (POPIA)Admin JWT
+6. SECURITY & COMPLIANCE ARCHITECTURE
+ENCRYPTION
+▸TLS 1.3 end-to-end
+▸AES-256-GCM at rest
+▸Tokenized SA ID storage
+▸PGP for sensitive exports
+IDENTITY & ACCESS
+▸JWT + refresh tokens
+▸Supabase RLS policies
+▸Role-based access
+(admin/user/driver)
+▸OTP session binding
+FRAUD DETECTION
+▸Python ML anomaly model
+▸Velocity checks (spend limits)
+▸Device fingerprinting
+▸Geo-mismatch flagging
+COMPLIANCE
+▸POPIA data governance
+▸Audit log every action
+▸Consent capture (T&C checkbox)
+▸Right-to-erasure endpoint
+KYC / ITC
+▸TransUnion bureau API
+▸Experian affordability
+▸Biometric ID face-match
+▸ITC score threshold rules
+MESSAGING
+▸Twilio SMS (OTP + alerts)
+▸SendGrid email templates
+▸Delivery notifications
+▸Fraud alert SMS triggers
+
+===== PAGE 5 =====
+
+7. INTEGRATION ARCHITECTURE & DATA FLOW
+Customer @ Amazon/Temu/Takealot
+        │
+        ▼
+[ PONDO Checkout Widget / Redirect ]
+        │
+   Step 1: POST /api/pondo/fetch-cart
+        │  → eCommerce Partner API → product + customer details
+        │  → Session created in Postgres
+        │
+   Step 2: POST /api/pondo/send-otp
+        │  → Twilio SMS / SendGrid Email → OTP to customer
+        │  → Customer accepts T&C checkbox
+        │
+   Step 3: POST /api/pondo/kyc-check
+        │  → TransUnion API → ITC bureau score
+        │  → Experian API → affordability vetting
+        │  → Python ML Microservice → fraud score
+        │
+   Step 4: POST /api/pondo/confirm-route
+        │  → Cost split calculated (merchant % / customer %)
+        │  → PED driver assigned (KYC-cleared)
+        │
+   Step 5: POST /api/pondo/complete
+           → Transaction cleared → Postgres updated
+           → Webhook to partner eCommerce (order fulfilled)
+           → PED delivery initiated (Yoco/SoftPOS device)
+           → SMS + Email: "Verified delivery en route"
+8. CI/CD PIPELINE & DEPLOYMENT (GITHUB ACTIONS → VERCEL + SUPABASE)
+GitHub Actions Workflow
+▸Push to main → trigger CI pipeline
+▸Run tests (Jest + Pytest for Python service)
+▸Build Next.js app → deploy to Vercel
+▸Run Supabase migrations via CLI
+▸Deploy Python microservice to container
+▸Slack / email notification on success/fail
+Environment Strategy
+▸dev → staging → production branching
+▸Supabase: separate projects per env
+▸Vercel: preview deployments per PR
+▸Secrets via GitHub Secrets + Vercel env vars
+▸Database: Supabase managed Postgres (pgBouncer)
+▸CDN: Vercel Edge Network (global, <50ms)
+9. PROTOTYPE DEMO — SIMULATED DATA & INTEGRATIONS
+Simulated Integrations
+▸Amazon sandbox API → mock product fetch
+▸Mock TransUnion response: score 620, approved
+▸Mock Experian affordability: income R18,000/mo
+▸Python fraud microservice: score 0.04 (low risk)
+▸Twilio test mode: OTP printed to console
+Demo User Seed Data
+▸Thabo Nkosi — ID: 8501015800083 — R26,999 iPhone
+▸Naledi Dlamini — ID: 9203124200186 — R18,999 TV
+▸Sipho Molefe — ID: 8812036100095 — R499 Groceries
+▸All users: affordability pre-approved, KYC verified
+PONDO — Trust Commerce
+Technical Specification v1.0 · Confidential · April 2026
+Stack: Next.js · Node.js · Python · PostgreSQL
+Deploy: Vercel + Supabase · CI/CD: GitHub Actions
