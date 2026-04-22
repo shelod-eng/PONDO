@@ -10,6 +10,7 @@ import { demoProducts, getCategories } from "./pondoDemo/catalog.js";
 import { demoSaIds, simulateCreditVet } from "./pondoDemo/credit.js";
 import { createEventHub } from "./pondoDemo/events.js";
 import { createOrderService } from "./pondoDemo/orders.js";
+import { bootstrapPartnerSession, listPartnerNames, sendOtpCode, verifyOtpCode } from "./pondoDemo/partners.js";
 import { z } from "zod";
 
 const app = express();
@@ -21,6 +22,20 @@ const storage = createStorage();
 await storage.init();
 const eventHub = createEventHub();
 const orderService = createOrderService({ storage, eventHub, secret: config.jwtSecret });
+const authUsers = new Map(
+  [
+    { username: "customer@example.com", password: "demo", role: "customer" },
+    { username: "thabo@email.com", password: "demo", role: "customer" },
+    { username: "naledi@email.com", password: "demo", role: "customer" },
+    { username: "sipho@email.com", password: "demo", role: "customer" },
+    { username: "amara@email.com", password: "demo", role: "customer" },
+    { username: "sponsor@example.com", password: "demo", role: "sponsor" },
+  ].map((u) => [u.username, u]),
+);
+
+function normalizeUsername(value) {
+  return String(value || "").trim().toLowerCase();
+}
 
 function pickGateway({ paymentMethod, gateway }) {
   if (gateway) return gateway;
@@ -43,6 +58,77 @@ app.get("/api/pondo/catalog/products", (req, res) => {
 
 app.get("/api/pondo/credit/demo-ids", (req, res) => {
   return res.json({ items: demoSaIds });
+});
+
+const fetchCartSchema = z.object({
+  partner: z.enum(["amazon", "temu", "takealot", "woocommerce", "shopify"]),
+  email: z.string().email(),
+});
+
+app.get("/api/pondo/partners", (req, res) => {
+  return res.json({ items: listPartnerNames() });
+});
+
+const registerSchema = z.object({
+  username: z.string().email(),
+  password: z.string().min(4).max(128),
+  fullName: z.string().min(2).max(120).optional(),
+});
+
+app.post("/api/pondo/register", (req, res) => {
+  const parsed = registerSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_request", details: parsed.error.flatten() });
+  const username = normalizeUsername(parsed.data.username);
+  if (authUsers.has(username)) return res.status(409).json({ error: "user_exists" });
+
+  authUsers.set(username, {
+    username,
+    password: parsed.data.password,
+    role: "customer",
+    fullName: parsed.data.fullName || "",
+  });
+  return res.status(201).json({ ok: true, username, role: "customer" });
+});
+
+app.post("/api/pondo/fetch-cart", (req, res) => {
+  const parsed = fetchCartSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_request", details: parsed.error.flatten() });
+  try {
+    const session = bootstrapPartnerSession(parsed.data);
+    return res.json({ session });
+  } catch (e) {
+    return res.status(400).json({ error: e instanceof Error ? e.message : "fetch_cart_failed" });
+  }
+});
+
+const otpSendSchema = z.object({
+  sessionId: z.string().min(4),
+  channel: z.enum(["sms", "email"]),
+  destination: z.string().min(4),
+});
+
+app.post("/api/pondo/send-otp", (req, res) => {
+  const parsed = otpSendSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_request", details: parsed.error.flatten() });
+  const sent = sendOtpCode(parsed.data);
+  return res.json({
+    requestId: sent.requestId,
+    expiresAt: sent.expiresAt,
+    demoOtp: sent.otpCode,
+  });
+});
+
+const otpVerifySchema = z.object({
+  requestId: z.string().min(6),
+  code: z.string().min(4).max(6),
+});
+
+app.post("/api/pondo/verify-otp", (req, res) => {
+  const parsed = otpVerifySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_request", details: parsed.error.flatten() });
+  const out = verifyOtpCode(parsed.data);
+  if (!out.ok) return res.status(400).json({ error: out.reason });
+  return res.json({ ok: true, sessionId: out.sessionId });
 });
 
 const bnplVetSchema = z.object({
@@ -68,16 +154,24 @@ const createOrderSchema = z.object({
     province: z.string().min(1),
     postalCode: z.string().min(3),
   }),
-  paymentMethod: z.enum(["card", "eft", "bnpl"]),
+  paymentMethod: z.literal("card"),
+});
+
+const settlementBankSchema = z.enum(["absa", "fnb", "standard_bank"]);
+const notifyChannelSchema = z.enum(["sms", "email"]);
+const payOrderSchema = z.object({
+  paymentMethod: z.literal("card"),
+  settlementBank: settlementBankSchema.optional(),
+  notifyEmail: z.string().email().optional(),
+  notifyChannels: z.array(notifyChannelSchema).min(1).optional(),
 });
 
 app.post("/api/pondo/orders", requireAuth, requireRole(["customer", "sponsor"]), async (req, res) => {
   const parsed = createOrderSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "invalid_request", details: parsed.error.flatten() });
-
-  const gateway = parsed.data.paymentMethod === "bnpl" ? "payflex" : parsed.data.paymentMethod === "eft" ? "ozow" : "peach";
+  const gateway = "peach";
   try {
-    const out = await orderService.createOrder({
+    const order = await orderService.createOrder({
       actor: req.user.sub,
       customerId: parsed.data.customerId,
       items: parsed.data.items,
@@ -85,9 +179,56 @@ app.post("/api/pondo/orders", requireAuth, requireRole(["customer", "sponsor"]),
       paymentMethod: parsed.data.paymentMethod,
       gateway,
     });
-    return res.json(out);
+    return res.json(order);
   } catch (e) {
-    return res.status(400).json({ error: e instanceof Error ? e.message : "create_failed" });
+    return res.status(400).json({ error: e instanceof Error ? e.message : "create_order_failed" });
+  }
+});
+
+
+// New endpoint: Full backend flow for steps 3, 4, and 5
+app.post("/api/pondo/orders/full-checkout", requireAuth, requireRole(["customer", "sponsor"]), async (req, res) => {
+  const parsed = createOrderSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_request", details: parsed.error.flatten() });
+
+  const gateway = "peach";
+  try {
+    // Step 1: Create order
+    const order = await orderService.createOrder({
+      actor: req.user.sub,
+      customerId: parsed.data.customerId,
+      items: parsed.data.items,
+      delivery: parsed.data.delivery,
+      paymentMethod: parsed.data.paymentMethod,
+      gateway,
+    });
+
+    // Step 3: Credit/KYC check (simulate)
+    // For demo, always approve with mock data
+    const creditResult = { score: 750, tier: "A", approved: true };
+    await orderService.attachCreditVet({
+      actor: req.user.sub,
+      id: order.transaction.id,
+      bureau: "transunion",
+      saId: "0000000000000",
+      result: creditResult,
+    });
+
+    // Step 4: Route confirmation (simulate)
+    // For demo, nothing extra needed, but could log/trigger event here
+
+    // Step 5: Authorize payment and trigger delivery
+    const settled = await orderService.authorizePayment({
+      actor: req.user.sub,
+      id: order.transaction.id,
+      paymentMethod: parsed.data.paymentMethod,
+    });
+    if (!settled) return res.status(404).json({ error: "not_found" });
+    if (settled.transaction?.status === "failed") return res.status(402).json({ error: "payment_declined", transaction: settled.transaction });
+
+    return res.json(settled);
+  } catch (e) {
+    return res.status(400).json({ error: e instanceof Error ? e.message : "full_checkout_failed" });
   }
 });
 
@@ -107,14 +248,20 @@ app.post("/api/pondo/orders/:id/bnpl-vet", requireAuth, requireRole(["customer",
   return res.json({ result, transaction: updated });
 });
 
-const payOrderSchema = z.object({ paymentMethod: z.enum(["card", "eft", "bnpl"]) });
 app.post("/api/pondo/orders/:id/pay", requireAuth, requireRole(["customer", "sponsor"]), async (req, res) => {
   const parsed = payOrderSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "invalid_request", details: parsed.error.flatten() });
-  const updated = await orderService.authorizePayment({ actor: req.user.sub, id: req.params.id, paymentMethod: parsed.data.paymentMethod });
-  if (!updated) return res.status(404).json({ error: "not_found" });
-  if (updated.status === "failed") return res.status(402).json({ error: "payment_declined", transaction: updated });
-  return res.json({ transaction: updated });
+  const settled = await orderService.authorizePayment({
+    actor: req.user.sub,
+    id: req.params.id,
+    paymentMethod: parsed.data.paymentMethod,
+    settlementBank: parsed.data.settlementBank,
+    notifyEmail: parsed.data.notifyEmail,
+    notifyChannels: parsed.data.notifyChannels,
+  });
+  if (!settled) return res.status(404).json({ error: "not_found" });
+  if (settled.transaction?.status === "failed") return res.status(402).json({ error: "payment_declined", transaction: settled.transaction });
+  return res.json(settled);
 });
 
 app.get("/api/pondo/orders/:id", requireAuth, requireRole(["customer", "sponsor"]), async (req, res) => {
@@ -123,48 +270,10 @@ app.get("/api/pondo/orders/:id", requireAuth, requireRole(["customer", "sponsor"
   return res.json(out);
 });
 
-const reportSchema = z.object({
-  sendTo: z.string().min(3).optional(),
-});
-
-app.post("/api/pondo/orders/:id/report", requireAuth, requireRole(["customer", "sponsor"]), async (req, res) => {
-  const parsed = reportSchema.safeParse(req.body || {});
-  if (!parsed.success) return res.status(400).json({ error: "invalid_request", details: parsed.error.flatten() });
-
-  const out = await orderService.getOrder(req.params.id);
-  if (!out) return res.status(404).json({ error: "not_found" });
-
-  const tx = out.transaction;
-  const reportId = `RPT-${tx.id.slice(0, 8).toUpperCase()}`;
-  const sendTo = parsed.data.sendTo || tx.customer_id;
-  const report = {
-    reportId,
-    orderId: tx.id,
-    generatedAt: new Date().toISOString(),
-    sentTo,
-    customerId: tx.customer_id,
-    amountCents: tx.amount_cents,
-    status: tx.status,
-    gateway: tx.gateway,
-    gatewayStatus: tx.gateway_status,
-    creditTier: tx.credit_tier,
-    details: out.details || null,
-    auditCount: out.audit.length,
-    journey: {
-      initiated: out.audit.some((a) => a.action === "order.created"),
-      creditChecked: out.audit.some((a) => a.action === "bnpl.credit_vet"),
-      settled: out.audit.some((a) => a.action === "payment.settled"),
-      completed: tx.status === "reconciled",
-    },
-  };
-
-  await storage.addAuditEntry(tx.id, {
-    actor: req.user.sub,
-    action: "report.sent",
-    data: { reportId, sentTo },
-  });
-
-  return res.json({ sent: true, report });
+app.get("/api/pondo/orders/:id/process", requireAuth, requireRole(["customer", "sponsor"]), async (req, res) => {
+  const out = await orderService.getDeliveryProcess(req.params.id);
+  if (!out) return res.status(404).json({ error: "process_not_started" });
+  return res.json(out);
 });
 
 app.get("/api/pondo/sponsor/orders", requireAuth, requireRole("sponsor"), async (req, res) => {
@@ -195,9 +304,18 @@ app.get("/api/pondo/sponsor/stream", requireAuth, requireRole("sponsor"), (req, 
 app.post("/auth/login", (req, res) => {
   const { username, password, role } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: "missing_credentials" });
-  const safeRole = role === "sponsor" ? "sponsor" : "customer";
-  const token = signToken({ sub: String(username), role: safeRole });
-  return res.json({ token, role: safeRole });
+  const normalized = normalizeUsername(username);
+  const account = authUsers.get(normalized);
+  if (!account || account.password !== String(password)) return res.status(401).json({ error: "invalid_credentials" });
+
+  const requestedRole = role === "sponsor" ? "sponsor" : "customer";
+  if (requestedRole === "sponsor" && account.role !== "sponsor") {
+    return res.status(403).json({ error: "forbidden_role" });
+  }
+
+  const tokenRole = requestedRole === "sponsor" ? "sponsor" : "customer";
+  const token = signToken({ sub: normalized, role: tokenRole });
+  return res.json({ token, role: tokenRole });
 });
 
 app.post("/api/checkout/initiate", requireAuth, requireRole(["customer", "sponsor"]), async (req, res) => {

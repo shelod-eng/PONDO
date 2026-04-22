@@ -43,38 +43,137 @@ export type DeliveryDetails = {
 };
 
 export type DemoOrderDetail = { transaction: Transaction; details: unknown; audit: AuditEntry[] };
-export type DemoJourneyReport = {
-  reportId: string;
+export type DeliveryProcessStep = {
+  index: number;
+  title: string;
+  detail: string;
+  status: "pending" | "active" | "completed";
+  completedAt: string | null;
+};
+export type DeliveryProcess = {
   orderId: string;
-  generatedAt: string;
-  sentTo: string;
-  customerId: string;
+  status: "running" | "completed";
+  startedAt: string;
+  updatedAt: string;
+  progressPct: number;
+  activeStep: number | null;
+  steps: DeliveryProcessStep[];
+};
+export type SettlementBank = "absa" | "fnb" | "standard_bank";
+export type PaymentSettlement = {
+  bank: SettlementBank;
+  bankLabel: string;
+  accountRef: string;
+  settledAt: string;
   amountCents: number;
-  status: string;
-  gateway: string;
-  gatewayStatus: string;
-  creditTier: string | null;
-  details: unknown;
-  auditCount: number;
-  journey: {
-    initiated: boolean;
-    creditChecked: boolean;
-    settled: boolean;
-    completed: boolean;
+  currency: string;
+};
+export type PaymentNotification = {
+  channel: "sms" | "email";
+  destination: string;
+  status: "sent";
+  sentAt: string;
+  message: string;
+};
+export type PartnerName = "amazon" | "temu" | "takealot" | "woocommerce" | "shopify";
+export type PartnerBootstrapSession = {
+  sessionId: string;
+  partner: PartnerName;
+  partnerLabel: string;
+  customer: {
+    email: string;
+    fullName: string;
+    idNumber: string;
+    phone: string;
+    address: string;
+    geoLocation: string;
+    monthlyIncome: number;
+    affordabilityBand: string;
+  };
+  product: {
+    id: string;
+    brand: string;
+    name: string;
+    category: string;
+    priceCents: number;
+    discountPct: number;
+    rating: number;
+    stock: number;
+    merchantName: string;
   };
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000";
+const configuredApiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+const API_BASE_URLS = Array.from(new Set([configuredApiBase, "http://localhost:4100", "http://localhost:4000"].filter(Boolean))) as string[];
+const API_BASE_URL = API_BASE_URLS[0];
+
+function extractErrorMessage(status: number, data: unknown, text: string) {
+  if (data && typeof data === "object") {
+    const maybeError = (data as { error?: unknown; message?: unknown }).error;
+    const maybeMessage = (data as { error?: unknown; message?: unknown }).message;
+    if (typeof maybeError === "string" && maybeError.trim()) return maybeError;
+    if (typeof maybeMessage === "string" && maybeMessage.trim()) return maybeMessage;
+  }
+  if (text.trim()) return text.trim();
+  return `request_failed_${status}`;
+}
 
 async function apiFetch<T>(path: string, init?: RequestInit & { token?: string }) {
   const headers = new Headers(init?.headers);
   headers.set("content-type", "application/json");
   if (init?.token) headers.set("authorization", `Bearer ${init.token}`);
 
-  const res = await fetch(`${API_BASE_URL}${path}`, { ...init, headers, cache: "no-store" });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data?.error || "request_failed"), { status: res.status, data });
-  return data as T;
+  let lastError: Error | null = null;
+  for (let i = 0; i < API_BASE_URLS.length; i += 1) {
+    const baseUrl = API_BASE_URLS[i];
+    const hasNext = i < API_BASE_URLS.length - 1;
+    try {
+      const res = await fetch(`${baseUrl}${path}`, { ...init, headers, cache: "no-store" });
+      const rawText = await res.text();
+      const contentType = res.headers.get("content-type") || "";
+      const isJson = contentType.includes("application/json") || contentType.includes("+json");
+      let data: unknown = {};
+      if (rawText) {
+        if (isJson) {
+          try {
+            data = JSON.parse(rawText);
+          } catch {
+            const parseErr = Object.assign(new Error("invalid_api_response"), { path, baseUrl, status: res.status });
+            lastError = parseErr;
+            if (hasNext) continue;
+            throw parseErr;
+          }
+        } else {
+          data = { message: rawText };
+        }
+      }
+
+      if (res.ok) {
+        if (isJson) return data as T;
+        const nonJsonErr = Object.assign(new Error("api_endpoint_unavailable"), { path, baseUrl, status: res.status });
+        lastError = nonJsonErr;
+        if (hasNext) continue;
+        throw nonJsonErr;
+      }
+
+      const message = extractErrorMessage(res.status, data, rawText);
+
+      // Fallback to the next candidate when this backend does not expose the route.
+      if ((res.status === 404 || res.status === 405 || res.status === 502 || res.status === 503 || res.status === 504) && hasNext) continue;
+
+      throw Object.assign(new Error(message), { status: res.status, data, baseUrl, path });
+    } catch (error) {
+      if (error instanceof Error) {
+        lastError = error;
+      } else {
+        lastError = new Error("request_failed");
+      }
+      if (hasNext) continue;
+      throw lastError;
+    }
+  }
+
+  throw lastError || new Error("request_failed");
 }
 
 export async function login(input: { username: string; password: string; role: Role }) {
@@ -83,7 +182,7 @@ export async function login(input: { username: string; password: string; role: R
 
 export async function initiateCheckout(
   token: string,
-  input: { customerId: string; amountCents: number; currency: string; paymentMethod: string; gateway?: string },
+  input: { customerId: string; amountCents: number; currency: string; paymentMethod: "card"; gateway?: string },
 ) {
   return apiFetch<{ transaction: Transaction; qrPayload: string; barcodePayload: string }>("/api/checkout/initiate", {
     method: "POST",
@@ -108,7 +207,7 @@ export async function creditVet(token: string, transactionId: string, input: { c
   });
 }
 
-export async function pay(token: string, transactionId: string, method: string) {
+export async function pay(token: string, transactionId: string, method: "card") {
   return apiFetch<{ transaction: Transaction }>(`/api/checkout/${transactionId}/pay`, {
     method: "POST",
     token,
@@ -142,9 +241,16 @@ export async function fetchDemoSaIds() {
   return apiFetch<{ items: Array<{ saId: string; label: string }> }>("/api/pondo/credit/demo-ids");
 }
 
+export async function simulateDemoCredit(input: { saId: string; bureau: "transunion" | "experian" }) {
+  return apiFetch<{ result: { score: number; tier: string; approved: boolean; bureau: string } }>("/api/pondo/credit/simulate", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function createDemoOrder(
   token: string,
-  input: { customerId: string; items: Array<{ productId: string; qty: number }>; delivery: DeliveryDetails; paymentMethod: "card" | "eft" | "bnpl" },
+  input: { customerId: string; items: Array<{ productId: string; qty: number }>; delivery: DeliveryDetails; paymentMethod: "card" },
 ) {
   return apiFetch<{ transaction: Transaction; qrPayload: string }>("/api/pondo/orders", { method: "POST", token, body: JSON.stringify(input) });
 }
@@ -157,20 +263,28 @@ export async function bnplVetDemoOrder(token: string, id: string, input: { saId:
   });
 }
 
-export async function payDemoOrder(token: string, id: string, paymentMethod: "card" | "eft" | "bnpl") {
-  return apiFetch<{ transaction: Transaction }>(`/api/pondo/orders/${id}/pay`, { method: "POST", token, body: JSON.stringify({ paymentMethod }) });
+export async function payDemoOrder(
+  token: string,
+  id: string,
+  paymentMethod: "card",
+  options?: { settlementBank?: SettlementBank; notifyEmail?: string; notifyChannels?: Array<"sms" | "email"> },
+) {
+  return apiFetch<{ transaction: Transaction; settlement: PaymentSettlement; notifications: PaymentNotification[] }>(
+    `/api/pondo/orders/${id}/pay`,
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify({ paymentMethod, ...options }),
+    },
+  );
 }
 
 export async function getDemoOrder(token: string, id: string) {
   return apiFetch<DemoOrderDetail>(`/api/pondo/orders/${id}`, { token });
 }
 
-export async function generateDemoOrderReport(token: string, id: string, input?: { sendTo?: string }) {
-  return apiFetch<{ sent: boolean; report: DemoJourneyReport }>(`/api/pondo/orders/${id}/report`, {
-    method: "POST",
-    token,
-    body: JSON.stringify(input || {}),
-  });
+export async function getDemoOrderProcess(token: string, id: string) {
+  return apiFetch<DeliveryProcess>(`/api/pondo/orders/${id}/process`, { token });
 }
 
 export async function sponsorDemoSummary(token: string) {
@@ -183,4 +297,26 @@ export async function sponsorDemoOrders(token: string) {
 
 export function sponsorDemoEventSource(token: string) {
   return new EventSource(`${API_BASE_URL}/api/pondo/sponsor/stream?token=${encodeURIComponent(token)}`);
+}
+
+// --- PONDO trust-checkout endpoints aligned to payment journey spec ---
+export async function fetchPartnerCart(input: { partner: PartnerName; email: string }) {
+  return apiFetch<{ session: PartnerBootstrapSession }>("/api/pondo/fetch-cart", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function sendOtp(input: { sessionId: string; channel: "sms" | "email"; destination: string }) {
+  return apiFetch<{ requestId: string; expiresAt: number; demoOtp: string }>("/api/pondo/send-otp", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function verifyOtp(input: { requestId: string; code: string }) {
+  return apiFetch<{ ok: true; sessionId: string }>("/api/pondo/verify-otp", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
