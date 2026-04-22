@@ -1,0 +1,18 @@
+I am saving it for tomorrow and thanks for asking. I need assistance with developing a Payment  Checkout System based on the 1st Screenshot - 
+NB: reason the client is developing such a portal/eCommerce platform - is due to the fact that a lot of people do not have trust buying items Online from sites such as 
+(Amazon, Temu, eBay & Takealot) and the 3rd screenshot that I developed yesterday using Base44. The idea is for us to focus on developing an 
+eCommerce based on the 1st screenshot that will be integrated with eCommerce sites (Amazon, Temu, Takealot) etc - with the 3rd screenshot in mind 
+I need what we are going to be developing to have the same look and feel in terms of the colours of what we will be developing. The client's requirements are 
+that the whole payment journey should expose this platform that will ensure that when they are buying items, goods, electronics etc online through e-Commerce sites they come through our 
+eCommerce site which acts as a payment checkout system and once we've done on KYC, Credit Vetting for affordability, ITC check through (Trans Union or Experian) - we proceed to step 4, 
+however the process should be initiated when the client starts at step 1 and to proceed to step 2 - we would need to fetch customers details through API calls 
+from e-Commerce sites (Amazon, Temu Takelot) etc and the activate process for step 2 (where ITC, KYC and Vetting) are performed and for each action performed at 
+step 2 we need to have a Messaging platform or mechanism that can either send SMS or email from the details that client/customer would have provided, also important on step 2 
+we need to ensure each customer before processing their information we make sure they accept our T & C's as check box - Step integrates with third party systems (KYC, TransUnion(ITC), Vetting) - 
+for the entire payment journey - image 6 & 7 are performed at step 5 - now I need your guidance on how I can instruct Base44 to develop a 
+technical spec for development using tech stack(Node.js,Next.js,maybe python for fraud detection and protecting customer data, Postgres SQL, VSCode) etc 
+and also develop a prototype with real live demo data based on the requirements for our e-Commerce called PONDO - (PONDO acts as payments for eCommerce sites such Amazon, Temu, WooCommerce, 
+Takealot & Shopify). NB: it is important that we strictly instruct Base44 to use image 3 to develop this prototype and simulate integration to Amazon or any eCommerce site and as well integrate 
+with (TransUnion or Experian) and include KYC and Vetting checks - the site should allow users/customer to register and we store data in our database (Postgres SQL) 
+Tech Spec is important as well as the Prototype that I can check before I can start with my own development in VSCode or PyCharm.
+idea is to use GitHub for CI/CD and use supabase and vercel for deployment. (NB: Focus for development is for Image1)

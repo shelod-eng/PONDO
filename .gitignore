@@ -1,0 +1,8 @@
+node_modules
+.idea/
+.venv/
+repo_push/
+*.log
+devweb.err.log
+devweb.out.log
+api/.env.local
