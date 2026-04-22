@@ -33,36 +33,6 @@ const partnerOptions: Array<{ id: PartnerName; label: string }> = [
   { id: "woocommerce", label: "WooCommerce" },
 ];
 
-const deliveryLoopNodes = [
-  {
-    title: "Node 1: Pick & Dispatch",
-    detail: "Parcels are tagged and dispatched with a unique PONDO QR token.",
-  },
-  {
-    title: "Node 2: Vetted Drivers",
-    detail: "Drivers are KYC-cleared and trust-vetted before they can carry PED deliveries.",
-  },
-  {
-    title: "Node 3: Field Verification",
-    detail: "Driver and buyer identities are verified at the door before final handover.",
-  },
-];
-
-const pedSecurityBlocks = [
-  {
-    title: "PED Devices & SoftPOS",
-    detail: "Yoco or SoftPOS hardware enables secure, mobile field transactions.",
-  },
-  {
-    title: "Vetted Custody",
-    detail: "KYC-cleared drivers preserve custody for cash or digital handovers.",
-  },
-  {
-    title: "Centralized Return Protocol",
-    detail: "PED devices are returned to base each shift to close risk loops.",
-  },
-];
-
 const confirmationSteps = [
   {
     title: "Dispatch Initiation",
@@ -82,7 +52,7 @@ const confirmationSteps = [
   },
   {
     title: "Conclusion",
-    detail: "Final payment confirmation automatically triggers invoice initiation.",
+    detail: "Yoco or Vodacom SoftPOS card payment success closes the journey and triggers invoicing.",
   },
 ];
 
@@ -314,33 +284,70 @@ export default function PondoCheckoutPage() {
   const primaryCtaClass =
     "w-full rounded-xl bg-gradient-to-r from-[var(--pondo-orange-500)] to-[#d95a18] px-4 py-3 text-lg font-bold text-white shadow-[0_8px_18px_rgba(217,90,24,0.32)] hover:from-[var(--pondo-orange-400)] hover:to-[var(--pondo-orange-500)] disabled:opacity-60";
 
-  const deliverySteps = useMemo(() => {
-    if (deliveryProcessSnapshot) return deliveryProcessSnapshot.steps;
-    return confirmationSteps.map((item, idx) => ({
-      index: idx + 1,
-      title: item.title,
-      detail: item.detail,
-      status: "pending" as const,
-      completedAt: null,
-    }));
-  }, [deliveryProcessSnapshot]);
-
-  const customerVisibleDeliverySteps = useMemo(() => deliverySteps.slice(0, 3), [deliverySteps]);
-
   const driverArrivedOnSite = useMemo(() => {
     if (!deliveryProcessSnapshot) return false;
     const onSiteStep = deliveryProcessSnapshot.steps.find((item) => item.index === 4);
     return onSiteStep ? onSiteStep.status !== "pending" : false;
   }, [deliveryProcessSnapshot]);
 
+  const partnerTrackingView = useMemo(() => {
+    const steps = confirmationSteps.map((item, idx) => ({
+      index: idx + 1,
+      title: item.title,
+      detail: item.detail,
+      status: "pending" as const,
+      completedAt: null as string | null,
+    }));
+
+    if (deliveryProcessSnapshot) {
+      return {
+        show: true,
+        progressPct: deliveryProcessSnapshot.progressPct,
+        processLabel:
+          deliveryProcessSnapshot.status === "completed"
+            ? "Partner confirmation completed"
+            : `${session?.partnerLabel || "Partner"} fulfilment is active`,
+        helperText: `PONDO is tracking ${session?.partnerLabel || "partner"} dispatch, driver movement, on-site verification, and SoftPOS payment confirmation in the background.`,
+        steps: steps.map((item, idx) => ({
+          ...item,
+          status: deliveryProcessSnapshot.steps[idx]?.status || item.status,
+          completedAt: deliveryProcessSnapshot.steps[idx]?.completedAt || item.completedAt,
+        })),
+      };
+    }
+
+    if (routeDecision && vetResult?.approved) {
+      return {
+        show: true,
+        progressPct: 12,
+        processLabel: `${session?.partnerLabel || "Partner"} route confirmed`,
+        helperText:
+          "Third-party ITC, KYC, affordability, and fraud checks succeeded. Partner dispatch tracking is primed and will advance automatically when fulfilment events and Yoco or Vodacom SoftPOS payment signals are received.",
+        steps: steps.map((item, idx) => ({
+          ...item,
+          status: idx === 0 ? ("active" as const) : item.status,
+        })),
+      };
+    }
+
+    return {
+      show: false,
+      progressPct: 0,
+      processLabel: "",
+      helperText: "",
+      steps,
+    };
+  }, [deliveryProcessSnapshot, routeDecision, session?.partnerLabel, vetResult?.approved]);
+
   function log(message: string) {
     setApiLogs((prev) => [`${ts()} ${message}`, ...prev].slice(0, 40));
   }
 
-  async function ensureCustomerAuth(forceRefresh = false) {
+  async function ensureCustomerAuth(forceRefresh = false, preferredUsername?: string) {
+    const username = (preferredUsername || capturedEmail || email || "customer@example.com").trim().toLowerCase();
     if (token && !forceRefresh) return token;
-    const out = await login({ username: email || "customer@example.com", password: "demo", role: "customer" });
-    setAuth({ token: out.token, role: out.role, username: email || "customer@example.com" });
+    const out = await login({ username, password: "demo", role: "customer" });
+    setAuth({ token: out.token, role: out.role, username });
     return out.token;
   }
 
@@ -487,7 +494,7 @@ export default function PondoCheckoutPage() {
         return { order, pay };
       };
 
-      let authToken = await ensureCustomerAuth();
+      let authToken = await ensureCustomerAuth(true, capturedEmail || customer.email);
       let submitted;
       try {
         submitted = await submitWithToken(authToken);
@@ -495,20 +502,20 @@ export default function PondoCheckoutPage() {
         const status = typeof e === "object" && e && "status" in e ? (e as { status?: number }).status : undefined;
         if (status !== 401) throw e;
         log("Session expired. Refreshing login token...");
-        authToken = await ensureCustomerAuth(true);
+        authToken = await ensureCustomerAuth(true, capturedEmail || customer.email);
         submitted = await submitWithToken(authToken);
       }
 
       setCompletedOrderId(submitted.order.transaction.id);
       setPaymentSettlement(submitted.pay.settlement);
       log(`Transaction cleared: ${submitted.order.transaction.id}`);
-      log("Payment method: card");
+      log("Yoco / Vodacom SoftPOS card payment confirmed");
       log(`Funds settled to PONDO ${submitted.pay.settlement.bankLabel} (${submitted.pay.settlement.accountRef})`);
-      log("Settlement notifications sent to shelod@gmail.com via SMS + email");
-      log("Delivery process kickoff triggered.");
+      log("Driver arrival and partner delivery confirmation tracking is running in the background.");
+      log("Customer notification will be released only once on-site arrival is confirmed.");
       log(`Order submitted using ${cartLines.length} cart item(s)`);
-      log("Webhook posted to partner eCommerce");
-      log(`PED delivery activated - ETA ${routeDecision.etaMinutes} min`);
+      log(`Webhook posted to ${session.partnerLabel}`);
+      log(`Partner-managed delivery tracking active - ETA ${routeDecision.etaMinutes} min`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "complete_failed");
     } finally {
@@ -794,7 +801,7 @@ export default function PondoCheckoutPage() {
                   </select>
                 </label>
                 <div className="rounded-lg border border-emerald-500/30 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                  Payment success notification will be sent to <span className="font-semibold">shelod@gmail.com</span> via SMS and email.
+                  Final notification is released only after on-site arrival is confirmed and the Yoco or Vodacom SoftPOS card payment succeeds.
                 </div>
 
                 <button
@@ -890,86 +897,43 @@ export default function PondoCheckoutPage() {
 
 
 
-        <section className="mt-6 rounded-2xl border border-[var(--pondo-line)] bg-white p-5 shadow-sm">
-          <h3 className="text-2xl font-black text-[var(--pondo-navy-900)]">Delivery Confirmation Sequence</h3>
-          <div className="mt-2 text-sm text-slate-600">
-            {deliveryProcessSnapshot
-              ? `Process ${deliveryProcessSnapshot.status} • ${deliveryProcessSnapshot.progressPct}% complete`
-              : "Process starts automatically after payment clears."}
-          </div>
-          <div className="mt-3 h-2 overflow-hidden rounded bg-[#dbe8ff]">
-            <div
-              className="h-full bg-[var(--pondo-orange-500)] transition-all duration-500"
-              style={{ width: `${deliveryProcessSnapshot?.progressPct ?? 0}%` }}
-            />
-          </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            {customerVisibleDeliverySteps.map((item) => (
-              <div
-                key={item.title}
-                className={[
-                  "rounded-xl border p-3 transition",
-                  item.status === "completed" ? "border-emerald-300 bg-emerald-50" : item.status === "active" ? "border-[var(--pondo-orange-500)] bg-[#fff6ea]" : "border-[var(--pondo-line)] bg-[#f7faff]",
-                ].join(" ")}
-              >
-                <div className="text-xs font-black uppercase tracking-[0.15em] text-slate-500">Step {item.index}</div>
-                <div className="mt-1 text-base font-extrabold text-[var(--pondo-navy-900)]">{item.title}</div>
-                <div className="mt-1 text-xs text-slate-600">{item.detail}</div>
-                <div className="mt-2 text-[11px] font-bold uppercase tracking-wide text-[var(--pondo-navy-800)]">{item.status}</div>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
-            Customer view shows steps 1-3 only. Back-office steps 4 and 5 remain hidden.
-          </div>
-        </section>
-
-        {deliveryProcessSnapshot ? (
+        {partnerTrackingView.show ? (
           <section className="mt-6 rounded-2xl border border-[var(--pondo-line)] bg-white p-5 shadow-sm">
-            <h3 className="text-2xl font-black text-[var(--pondo-navy-900)]">Delivery Loop Binds Digital Orders To Physical Reality</h3>
-            <div className="mt-2 text-sm text-slate-600">Operational loop started after payment clearance.</div>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              {deliveryLoopNodes.map((node, idx) => {
-                const nodeStatus = deliverySteps[idx]?.status || "pending";
-                return (
-                  <div
-                    key={node.title}
-                    className={[
-                      "rounded-xl border p-4",
-                      nodeStatus === "completed"
-                        ? "border-emerald-300 bg-emerald-50"
-                        : nodeStatus === "active"
-                          ? "border-[var(--pondo-orange-500)] bg-[#fff6ea]"
-                          : "border-[var(--pondo-line)] bg-[#f7faff]",
-                    ].join(" ")}
-                  >
-                    <div className="text-xs font-black uppercase tracking-[0.15em] text-slate-500">Node {idx + 1}</div>
-                    <div className="mt-1 text-xl font-extrabold text-[var(--pondo-navy-900)]">{node.title.replace(`Node ${idx + 1}: `, "")}</div>
-                    <div className="mt-1 text-sm text-slate-700">{node.detail}</div>
-                    <div className="mt-2 text-[11px] font-bold uppercase tracking-wide text-[var(--pondo-navy-800)]">{nodeStatus}</div>
-                  </div>
-                );
-              })}
+            <h3 className="text-2xl font-black text-[var(--pondo-navy-900)]">Partner Delivery Confirmation Sequence</h3>
+            <div className="mt-2 text-sm text-slate-600">
+              {partnerTrackingView.processLabel} • {partnerTrackingView.progressPct}% complete
             </div>
-          </section>
-        ) : null}
-
-        {driverArrivedOnSite ? (
-          <section className="mt-6 rounded-2xl border border-[var(--pondo-line)] bg-white p-5 shadow-sm">
-            <h3 className="text-2xl font-black text-[var(--pondo-navy-900)]">Securing The Payment Enabled Delivery (PED) Experience</h3>
-            <div className="mt-2 text-sm text-slate-600">Driver is now on-site. PED controls are active for handover.</div>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              {pedSecurityBlocks.map((item, idx) => (
-                <div key={item.title} className="rounded-xl border border-[var(--pondo-line)] bg-[#f7faff] p-4">
-                  <div className="text-xs font-black uppercase tracking-[0.15em] text-slate-500">Control {idx + 1}</div>
-                  <div className="mt-1 text-xl font-extrabold text-[var(--pondo-navy-900)]">{item.title}</div>
-                  <div className="mt-1 text-sm text-slate-700">{item.detail}</div>
+            <div className="mt-2 text-sm text-slate-600">{partnerTrackingView.helperText}</div>
+            <div className="mt-3 h-2 overflow-hidden rounded bg-[#dbe8ff]">
+              <div
+                className="h-full bg-[var(--pondo-orange-500)] transition-all duration-500"
+                style={{ width: `${partnerTrackingView.progressPct}%` }}
+              />
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              {partnerTrackingView.steps.map((item) => (
+                <div
+                  key={item.title}
+                  className={[
+                    "rounded-xl border p-4 transition",
+                    item.status === "completed" ? "border-emerald-300 bg-emerald-50" : item.status === "active" ? "border-[var(--pondo-orange-500)] bg-[#fff6ea]" : "border-[var(--pondo-line)] bg-[#f7faff]",
+                  ].join(" ")}
+                >
+                  <div className="text-xs font-black uppercase tracking-[0.15em] text-slate-500">Step {item.index}</div>
+                  <div className="mt-1 text-xl font-extrabold leading-tight text-[var(--pondo-navy-900)]">{item.title}</div>
+                  <div className="mt-2 text-sm text-slate-700">{item.detail}</div>
+                  <div className="mt-3 text-[11px] font-bold uppercase tracking-wide text-[var(--pondo-navy-800)]">{item.status}</div>
                 </div>
               ))}
             </div>
-            <div className="mt-4 rounded-lg border border-emerald-500/35 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-              On card payment success, funds are settled into PONDO business account ({paymentSettlement?.bankLabel || "selected bank"}) and notification is dispatched to shelod@gmail.com.
+            <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+              PONDO keeps the delivery loop, PED validation, and partner orchestration running in the backend while this customer view shows partner-facing confirmation milestones only.
             </div>
+            {driverArrivedOnSite && paymentSettlement ? (
+              <div className="mt-3 rounded-lg border border-emerald-500/35 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                Driver arrival has been confirmed and the Yoco or Vodacom SoftPOS card payment has cleared. PONDO has been notified and settlement is recorded into {paymentSettlement.bankLabel}.
+              </div>
+            ) : null}
           </section>
         ) : null}
       </div>
