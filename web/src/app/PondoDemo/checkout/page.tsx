@@ -24,6 +24,7 @@ import { fetchGeoLocation, type GeoLocation } from "@/lib/geolocation";
 import { useAuth } from "@/lib/auth";
 import { usePondoCart } from "@/lib/pondoCart";
 import { FALLBACK_IMAGE, FALLBACK_PRODUCTS, IMAGE_BY_PRODUCT } from "@/lib/demoCatalog";
+import { validateSAID } from "@/lib/validateSAID";
 
 const partnerOptions: Array<{ id: PartnerName; label: string }> = [
   { id: "amazon", label: "Amazon" },
@@ -160,6 +161,7 @@ export default function PondoCheckoutPage() {
   const [capturedPostalCode, setCapturedPostalCode] = useState("");
   const [geoLocationData, setGeoLocationData] = useState<GeoLocation | null>(null);
   const [geoLocationLoading, setGeoLocationLoading] = useState(false);
+  const [saidTouched, setSaidTouched] = useState(false);
 
   const [vetResult, setVetResult] = useState<VetResult | null>(null);
   const [routeDecision, setRouteDecision] = useState<RouteDecision | null>(null);
@@ -280,6 +282,10 @@ export default function PondoCheckoutPage() {
     }
     return "This profile may pass or fail depending on ITC and affordability checks.";
   }, [email]);
+  const normalizedIdNumber = capturedIdNumber.replace(/\D/g, "");
+  const isSaidComplete = normalizedIdNumber.length === 13;
+  const isSaidValid = isSaidComplete && validateSAID(normalizedIdNumber);
+  const showSaidFeedback = saidTouched || isSaidComplete;
 
   const primaryCtaClass =
     "w-full rounded-xl bg-gradient-to-r from-[var(--pondo-orange-500)] to-[#d95a18] px-4 py-3 text-lg font-bold text-white shadow-[0_8px_18px_rgba(217,90,24,0.32)] hover:from-[var(--pondo-orange-400)] hover:to-[var(--pondo-orange-500)] disabled:opacity-60";
@@ -384,6 +390,11 @@ export default function PondoCheckoutPage() {
 
   async function onSendOtp() {
     if (!session || !customer) return;
+    if (!isSaidValid) {
+      setSaidTouched(true);
+      setError("Enter a valid 13-digit South African ID number before requesting OTP.");
+      return;
+    }
     setError("");
     setBusy(true);
     try {
@@ -628,9 +639,34 @@ export default function PondoCheckoutPage() {
                     <label className="block text-xs font-bold text-slate-600 mb-1">ID Number</label>
                     <input 
                       value={capturedIdNumber} 
-                      onChange={(e) => setCapturedIdNumber(e.target.value)} 
-                      className="w-full rounded-lg border border-[var(--pondo-line)] px-3 py-2 text-slate-800" 
+                      onChange={(e) => {
+                        setCapturedIdNumber(e.target.value.replace(/\D/g, "").slice(0, 13));
+                        if (!saidTouched) setSaidTouched(true);
+                      }}
+                      onBlur={() => setSaidTouched(true)}
+                      inputMode="numeric"
+                      maxLength={13}
+                      placeholder="Enter your 13-digit SA ID number"
+                      className={[
+                        "w-full rounded-lg border px-3 py-2 text-slate-800",
+                        showSaidFeedback
+                          ? isSaidValid
+                            ? "border-emerald-500 bg-emerald-50/40"
+                            : "border-red-400 bg-red-50/40"
+                          : "border-[var(--pondo-line)]",
+                      ].join(" ")}
                     />
+                    {showSaidFeedback ? (
+                      isSaidValid ? (
+                        <p className="mt-1 text-xs font-semibold text-emerald-700">
+                          Valid South African ID number.
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-xs font-semibold text-red-600">
+                          Enter a valid 13-digit South African ID number.
+                        </p>
+                      )
+                    ) : null}
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-600 mb-1">Phone Number</label>
@@ -687,9 +723,14 @@ export default function PondoCheckoutPage() {
                 <div className="rounded-xl border border-[var(--pondo-line)] bg-[var(--pondo-surface-soft)] p-3">
                   <div className="mb-2 text-sm font-bold text-[var(--pondo-navy-800)]">OTP Verification (Twilio SMS / SendGrid Email)</div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <button onClick={onSendOtp} disabled={busy} className="rounded-lg bg-[var(--pondo-orange-500)] px-4 py-2 font-bold text-white hover:bg-[var(--pondo-orange-400)] disabled:opacity-60">Send OTP to {capturedPhone}</button>
+                    <button onClick={onSendOtp} disabled={busy || !isSaidValid} className="rounded-lg bg-[var(--pondo-orange-500)] px-4 py-2 font-bold text-white hover:bg-[var(--pondo-orange-400)] disabled:opacity-60">Send OTP to {capturedPhone}</button>
                     {demoOtp ? <div className="text-xs text-emerald-700">Demo OTP: {demoOtp}</div> : null}
                   </div>
+                  {!isSaidValid ? (
+                    <div className="mt-2 text-xs text-slate-500">
+                      OTP unlocks once a structurally valid SA ID number is entered.
+                    </div>
+                  ) : null}
                   <div className="mt-3 flex gap-2">
                     <input value={otpInput} onChange={(e) => setOtpInput(e.target.value)} placeholder="Enter OTP" className="w-full rounded-lg border border-[var(--pondo-line)] bg-white px-3 py-2 text-slate-800" />
                     <button onClick={onVerifyOtp} disabled={busy || !otpRequestId} className="rounded-lg bg-[var(--pondo-orange-500)] px-4 py-2 font-bold text-white hover:bg-[var(--pondo-orange-400)] disabled:opacity-60">Verify OTP</button>
@@ -710,6 +751,11 @@ export default function PondoCheckoutPage() {
 
                 <button
                   onClick={() => {
+                    if (!isSaidValid) {
+                      setSaidTouched(true);
+                      setError("Please enter a valid South African ID number before proceeding.");
+                      return;
+                    }
                     if (!otpVerified || !termsAccepted) {
                       setError("Please verify OTP and accept Terms & Conditions before proceeding");
                       return;
