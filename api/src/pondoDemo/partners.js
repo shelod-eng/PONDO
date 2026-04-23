@@ -11,7 +11,7 @@ const partnerLabels = {
 const partnerSeeds = {
   "thabo@email.com": {
     fullName: "Thabo Nkosi",
-    idNumber: "8501015800083",
+    idNumber: "8501015800088",
     phone: "+27 72 345 6789",
     address: "14 Main Rd, Soweto, Gauteng",
     geoLocation: "-26.2041, 28.0473",
@@ -20,7 +20,7 @@ const partnerSeeds = {
   },
   "naledi@email.com": {
     fullName: "Naledi Dlamini",
-    idNumber: "9203124200186",
+    idNumber: "9203124200180",
     phone: "+27 73 555 0090",
     address: "22 Vilakazi St, Orlando West, Gauteng",
     geoLocation: "-26.2347, 27.9084",
@@ -29,7 +29,7 @@ const partnerSeeds = {
   },
   "sipho@email.com": {
     fullName: "Sipho Molefe",
-    idNumber: "8812036100095",
+    idNumber: "8812036100097",
     phone: "+27 82 111 2040",
     address: "3 Market St, Durban Central, KZN",
     geoLocation: "-29.8587, 31.0218",

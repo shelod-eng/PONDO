@@ -431,7 +431,7 @@ export default function PondoCheckoutPage() {
     setError("");
     setBusy(true);
     try {
-      const data = await simulateDemoCredit({ saId: capturedIdNumber, bureau: "transunion" });
+      const data = await simulateDemoCredit({ saId: normalizedIdNumber, bureau: "transunion" });
       const transunionScore = data.result.score as number;
       const transunionApproved = Boolean(data.result.approved);
       const kycIdentityVerified = true;
