@@ -62,9 +62,9 @@ const sandboxOrders: SandboxOrder[] = [
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="rounded-2xl border border-[var(--pondo-line)] bg-white p-5">
+    <div className="rounded-2xl border border-pondo-line bg-white p-5">
       <div className="text-xs text-slate-500">{label}</div>
-      <div className="mt-2 text-4xl font-black text-[var(--pondo-navy-900)]">{value}</div>
+      <div className="mt-2 text-4xl font-black text-pondo-navy-900">{value}</div>
       {hint ? <div className="mt-2 text-xs text-slate-500">{hint}</div> : null}
     </div>
   );
@@ -181,24 +181,24 @@ export default function PondoSponsorDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f1f3f7] text-[var(--pondo-navy-900)]">
+    <div className="min-h-screen bg-[#f1f3f7] text-pondo-navy-900">
       <PondoDemoNav />
       <div className="mx-auto max-w-[1240px] px-4 py-6">
         <h1 className="text-5xl font-black tracking-tight">Sponsor Dashboard</h1>
         <p className="mt-2 text-sm text-slate-600">Live orchestration feed, audit log, and reconciliation-ready summary.</p>
 
         {!auth || auth.role !== "sponsor" ? (
-          <div className="mt-6 grid gap-4 rounded-2xl border border-[var(--pondo-line)] bg-white p-6 sm:grid-cols-3">
+          <div className="mt-6 grid gap-4 rounded-2xl border border-pondo-line bg-white p-6 sm:grid-cols-3">
             <label className="sm:col-span-2">
               <div className="text-xs text-slate-500">Username</div>
-              <input value={username} onChange={(e) => setUsername(e.target.value)} className="mt-2 w-full rounded-xl border border-[var(--pondo-line)] bg-white px-3 py-2 text-sm outline-none" />
+              <input value={username} onChange={(e) => setUsername(e.target.value)} className="mt-2 w-full rounded-xl border border-pondo-line bg-white px-3 py-2 text-sm outline-none" />
             </label>
             <label>
               <div className="text-xs text-slate-500">Password</div>
-              <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" className="mt-2 w-full rounded-xl border border-[var(--pondo-line)] bg-white px-3 py-2 text-sm outline-none" />
+              <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" className="mt-2 w-full rounded-xl border border-pondo-line bg-white px-3 py-2 text-sm outline-none" />
             </label>
             <div className="sm:col-span-3 flex items-center justify-between">
-              <button onClick={onLogin} disabled={busy} className="rounded-xl bg-[var(--pondo-orange-500)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--pondo-orange-400)] disabled:opacity-50">
+              <button onClick={onLogin} disabled={busy} className="rounded-xl bg-pondo-orange-500 px-4 py-2 text-sm font-semibold text-white hover:bg-pondo-orange-400 disabled:opacity-50">
                 Sign in as sponsor
               </button>
               <div className="text-xs text-slate-500">Sandbox data appears automatically after sign-in.</div>
@@ -214,27 +214,27 @@ export default function PondoSponsorDashboard() {
               <StatCard label="Gross" value={summary ? money(summary.grossCents) : "--"} hint="Sum of completed orders" />
             </div>
 
-            <div className="mt-4 flex items-center justify-between rounded-xl border border-[var(--pondo-line)] bg-white px-4 py-3">
+            <div className="mt-4 flex items-center justify-between rounded-xl border border-pondo-line bg-white px-4 py-3">
               <div className="text-sm font-semibold">Data mode: {sandboxMode ? "Sandbox mock data" : "Live + sandbox blend"}</div>
-              <button onClick={refresh} className="rounded-lg border border-[var(--pondo-line)] bg-[#f7faff] px-3 py-1.5 text-sm font-semibold text-[var(--pondo-navy-800)] hover:bg-[#e9f0ff]">
+              <button onClick={refresh} className="rounded-lg border border-pondo-line bg-[#f7faff] px-3 py-1.5 text-sm font-semibold text-pondo-navy-800 hover:bg-[#e9f0ff]">
                 Refresh
               </button>
             </div>
 
             {error ? <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">{error}</div> : null}
 
-            <div className="mt-4 rounded-2xl border border-[var(--pondo-line)] bg-white p-6">
+            <div className="mt-4 rounded-2xl border border-pondo-line bg-white p-6">
               <div className="text-sm font-semibold">Orchestration Table</div>
               <div className="mt-1 text-xs text-slate-500">Includes Amazon/Takealot sandbox records for demo reliability.</div>
 
-              <div className="mt-4 grid gap-3 rounded-xl border border-[var(--pondo-line)] bg-[#f7faff] p-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="mt-4 grid gap-3 rounded-xl border border-pondo-line bg-[#f7faff] p-3 sm:grid-cols-2 lg:grid-cols-4">
                 <input
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   placeholder="Search order, customer, product..."
-                  className="rounded-lg border border-[var(--pondo-line)] bg-white px-3 py-2 text-sm outline-none"
+                  className="rounded-lg border border-pondo-line bg-white px-3 py-2 text-sm outline-none"
                 />
-                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-lg border border-[var(--pondo-line)] bg-white px-3 py-2 text-sm">
+                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-lg border border-pondo-line bg-white px-3 py-2 text-sm">
                   <option value="all">All statuses</option>
                   <option value="initiated">Initiated</option>
                   <option value="processing">Processing</option>
@@ -243,17 +243,17 @@ export default function PondoSponsorDashboard() {
                   <option value="reconciled">Reconciled</option>
                   <option value="failed">Failed</option>
                 </select>
-                <select value={partnerFilter} onChange={(e) => setPartnerFilter(e.target.value)} className="rounded-lg border border-[var(--pondo-line)] bg-white px-3 py-2 text-sm">
+                <select value={partnerFilter} onChange={(e) => setPartnerFilter(e.target.value)} className="rounded-lg border border-pondo-line bg-white px-3 py-2 text-sm">
                   <option value="all">All partners</option>
                   <option value="Amazon">Amazon</option>
                   <option value="Takealot">Takealot</option>
                 </select>
-                <button onClick={exportCsv} className="rounded-lg bg-[var(--pondo-navy-900)] px-3 py-2 text-sm font-semibold text-white hover:bg-[var(--pondo-navy-800)]">
+                <button onClick={exportCsv} className="rounded-lg bg-pondo-navy-900 px-3 py-2 text-sm font-semibold text-white hover:bg-pondo-navy-800">
                   Export visible rows (CSV)
                 </button>
               </div>
 
-              <div className="mt-4 overflow-hidden rounded-xl border border-[var(--pondo-line)]">
+              <div className="mt-4 overflow-hidden rounded-xl border border-pondo-line">
                 <table className="w-full text-left text-sm">
                   <thead className="bg-[#eef2f8] text-xs text-slate-600">
                     <tr>
@@ -271,18 +271,18 @@ export default function PondoSponsorDashboard() {
                     {visibleOrders.length === 0 ? (
                       <tr>
                         <td colSpan={8} className="px-4 py-4 text-slate-600">
-                          No orders match these filters. Create one from <Link href="/PondoDemo/shop" className="font-semibold text-[var(--pondo-navy-800)] hover:underline">Shop</Link> or clear filters.
+                          No orders match these filters. Create one from <Link href="/PondoDemo/shop" className="font-semibold text-pondo-navy-800 hover:underline">Shop</Link> or clear filters.
                         </td>
                       </tr>
                     ) : (
                       visibleOrders.map((t) => (
-                        <tr key={t.id} className="border-t border-[var(--pondo-line)]">
+                        <tr key={t.id} className="border-t border-pondo-line">
                           <td className="px-4 py-3 font-semibold">{t.partner}</td>
                           <td className="px-4 py-3 font-mono text-xs">{t.id}</td>
                           <td className="px-4 py-3">{t.customer_id}</td>
                           <td className="px-4 py-3">{t.productName}</td>
                           <td className="px-4 py-3">
-                            <span className="rounded-full bg-[#eaf2ff] px-2 py-0.5 text-xs font-semibold text-[var(--pondo-navy-800)]">{t.status}</span>
+                            <span className="rounded-full bg-[#eaf2ff] px-2 py-0.5 text-xs font-semibold text-pondo-navy-800">{t.status}</span>
                           </td>
                           <td className="px-4 py-3">{t.gateway}</td>
                           <td className="px-4 py-3 font-semibold">{money(t.amount_cents)}</td>
@@ -300,3 +300,4 @@ export default function PondoSponsorDashboard() {
     </div>
   );
 }
+

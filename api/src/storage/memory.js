@@ -12,7 +12,7 @@ export function createMemoryStorage() {
     async init() {},
 
     async createTransaction(input) {
-      const id = randomUUID();
+      const id = input.id || randomUUID();
       const createdAt = nowIso();
       const tx = {
         id,

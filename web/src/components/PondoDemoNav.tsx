@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -13,7 +13,7 @@ function NavLink({ href, label }: { href: string; label: string }) {
       href={href}
       className={[
         "rounded-lg px-3 py-2 text-sm font-semibold transition",
-        active ? "bg-[var(--pondo-orange-500)] text-white shadow-sm" : "text-slate-100 hover:bg-white/10 hover:text-white",
+        active ? "bg-pondo-orange-500 text-white shadow-sm" : "text-slate-100 hover:bg-white/10 hover:text-white",
       ].join(" ")}
     >
       {label}
@@ -27,7 +27,7 @@ export function PondoDemoNav() {
   const cartCount = cart.hydrated ? cart.count : 0;
 
   return (
-    <div className="sticky top-0 z-20 border-b border-[#314a7d] bg-[var(--pondo-navy-900)] backdrop-blur">
+    <div className="sticky top-0 z-20 border-b border-[#314a7d] bg-pondo-navy-900 backdrop-blur">
       <div className="mx-auto flex max-w-[1240px] items-center justify-between px-6 py-3">
         <Link href="/PondoDemo/shop" className="text-sm font-extrabold tracking-wide text-white">
           PONDO <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#f0b082]">Trust Commerce</span>
@@ -35,6 +35,7 @@ export function PondoDemoNav() {
         <div className="flex items-center gap-2">
           <NavLink href="/PondoDemo/shop" label="Shop" />
           <NavLink href="/PondoDemo/cart" label={`Cart (${cartCount})`} />
+          <NavLink href="/PondoDemo/wallet" label="Wallet" />
           <NavLink href="/PondoDemo/sponsor" label="Sponsor" />
         </div>
         <div className="flex items-center gap-3">
@@ -60,3 +61,4 @@ export function PondoDemoNav() {
     </div>
   );
 }
+

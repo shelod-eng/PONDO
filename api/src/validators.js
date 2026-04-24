@@ -1,7 +1,7 @@
 import { z } from "zod";
+import { gateways, paymentMethods } from "./payment-config.js";
 
-export const paymentMethods = ["card"];
-export const gateways = ["peach", "payfast", "ozow", "payflex", "speedpoint"];
+export { paymentMethods, gateways };
 
 export const initiateSchema = z.object({
   customerId: z.string().min(1),

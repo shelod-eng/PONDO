@@ -30,7 +30,7 @@ export function TopNav() {
           PONDO Demo
         </Link>
         <div className="flex items-center gap-2">
-          <NavLink href="/checkout" label="Checkout" />
+          <NavLink href="/checkout" label="Sandbox Billing" />
           <NavLink href="/sponsor" label="Sponsor Portal" />
         </div>
         <div className="flex items-center gap-3">

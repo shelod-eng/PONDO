@@ -11,6 +11,7 @@ import { demoSaIds, simulateCreditVet } from "./pondoDemo/credit.js";
 import { createEventHub } from "./pondoDemo/events.js";
 import { createOrderService } from "./pondoDemo/orders.js";
 import { bootstrapPartnerSession, listPartnerNames, sendOtpCode, verifyOtpCode } from "./pondoDemo/partners.js";
+import { paymentMethods, pickGatewayForPaymentMethod, paymentMethodRequiresCreditVet } from "./payment-config.js";
 import { z } from "zod";
 
 const app = express();
@@ -38,10 +39,7 @@ function normalizeUsername(value) {
 }
 
 function pickGateway({ paymentMethod, gateway }) {
-  if (gateway) return gateway;
-  if (paymentMethod === "bnpl") return "payflex";
-  if (paymentMethod === "speedpoint" || paymentMethod === "pos") return "speedpoint";
-  return "peach";
+  return pickGatewayForPaymentMethod(paymentMethod, gateway);
 }
 
 app.get("/healthz", (req, res) => res.json({ ok: true, name: "pondo-api", env: config.nodeEnv }));
@@ -154,22 +152,30 @@ const createOrderSchema = z.object({
     province: z.string().min(1),
     postalCode: z.string().min(3),
   }),
-  paymentMethod: z.literal("card"),
+  paymentMethod: z.enum(paymentMethods),
 });
 
 const settlementBankSchema = z.enum(["absa", "fnb", "standard_bank"]);
 const notifyChannelSchema = z.enum(["sms", "email"]);
 const payOrderSchema = z.object({
-  paymentMethod: z.literal("card"),
+  paymentMethod: z.enum(paymentMethods),
   settlementBank: settlementBankSchema.optional(),
   notifyEmail: z.string().email().optional(),
   notifyChannels: z.array(notifyChannelSchema).min(1).optional(),
 });
 
+const walletTopUpSchema = z.object({
+  customerId: z.string().min(1),
+  amountCents: z.number().int().positive(),
+  paymentMethod: z.enum(paymentMethods),
+  settlementBank: settlementBankSchema.optional(),
+  notifyEmail: z.string().email().optional(),
+});
+
 app.post("/api/pondo/orders", requireAuth, requireRole(["customer", "sponsor"]), async (req, res) => {
   const parsed = createOrderSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "invalid_request", details: parsed.error.flatten() });
-  const gateway = "peach";
+  const gateway = pickGateway({ paymentMethod: parsed.data.paymentMethod });
   try {
     const order = await orderService.createOrder({
       actor: req.user.sub,
@@ -191,7 +197,7 @@ app.post("/api/pondo/orders/full-checkout", requireAuth, requireRole(["customer"
   const parsed = createOrderSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "invalid_request", details: parsed.error.flatten() });
 
-  const gateway = "peach";
+  const gateway = pickGateway({ paymentMethod: parsed.data.paymentMethod });
   try {
     // Step 1: Create order
     const order = await orderService.createOrder({
@@ -205,14 +211,16 @@ app.post("/api/pondo/orders/full-checkout", requireAuth, requireRole(["customer"
 
     // Step 3: Credit/KYC check (simulate)
     // For demo, always approve with mock data
-    const creditResult = { score: 750, tier: "A", approved: true };
-    await orderService.attachCreditVet({
-      actor: req.user.sub,
-      id: order.transaction.id,
-      bureau: "transunion",
-      saId: "0000000000000",
-      result: creditResult,
-    });
+    if (paymentMethodRequiresCreditVet(parsed.data.paymentMethod)) {
+      const creditResult = { score: 750, tier: "A", approved: true };
+      await orderService.attachCreditVet({
+        actor: req.user.sub,
+        id: order.transaction.id,
+        bureau: "transunion",
+        saId: "0000000000000",
+        result: creditResult,
+      });
+    }
 
     // Step 4: Route confirmation (simulate)
     // For demo, nothing extra needed, but could log/trigger event here
@@ -262,6 +270,29 @@ app.post("/api/pondo/orders/:id/pay", requireAuth, requireRole(["customer", "spo
   if (!settled) return res.status(404).json({ error: "not_found" });
   if (settled.transaction?.status === "failed") return res.status(402).json({ error: "payment_declined", transaction: settled.transaction });
   return res.json(settled);
+});
+
+app.post("/api/pondo/wallet/top-up", requireAuth, requireRole(["customer", "sponsor"]), async (req, res) => {
+  const parsed = walletTopUpSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "invalid_request", details: parsed.error.flatten() });
+
+  try {
+    const out = await orderService.topUpWallet({
+      actor: req.user.sub,
+      customerId: parsed.data.customerId,
+      amountCents: parsed.data.amountCents,
+      paymentMethod: parsed.data.paymentMethod,
+      settlementBank: parsed.data.settlementBank,
+      notifyEmail: parsed.data.notifyEmail,
+    });
+    return res.json(out);
+  } catch (e) {
+    return res.status(400).json({ error: e instanceof Error ? e.message : "wallet_topup_failed" });
+  }
+});
+
+app.get("/api/pondo/wallet/:customerId", requireAuth, requireRole(["customer", "sponsor"]), async (req, res) => {
+  return res.json({ customerId: req.params.customerId, balanceCents: orderService.getWalletBalance(req.params.customerId) });
 });
 
 app.get("/api/pondo/orders/:id", requireAuth, requireRole(["customer", "sponsor"]), async (req, res) => {

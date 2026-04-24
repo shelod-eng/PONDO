@@ -1,3 +1,5 @@
+import type { PaymentMethod } from "./paymentMethods";
+
 export type Role = "customer" | "sponsor";
 
 export type Transaction = {
@@ -74,6 +76,11 @@ export type PaymentNotification = {
   status: "sent";
   sentAt: string;
   message: string;
+};
+export type WalletTopUpResult = {
+  transaction: Transaction;
+  settlement: PaymentSettlement;
+  walletBalanceCents: number;
 };
 export type PartnerName = "amazon" | "temu" | "takealot" | "woocommerce" | "shopify";
 export type PartnerBootstrapSession = {
@@ -182,7 +189,7 @@ export async function login(input: { username: string; password: string; role: R
 
 export async function initiateCheckout(
   token: string,
-  input: { customerId: string; amountCents: number; currency: string; paymentMethod: "card"; gateway?: string },
+  input: { customerId: string; amountCents: number; currency: string; paymentMethod: PaymentMethod; gateway?: string },
 ) {
   return apiFetch<{ transaction: Transaction; qrPayload: string; barcodePayload: string }>("/api/checkout/initiate", {
     method: "POST",
@@ -207,7 +214,7 @@ export async function creditVet(token: string, transactionId: string, input: { c
   });
 }
 
-export async function pay(token: string, transactionId: string, method: "card") {
+export async function pay(token: string, transactionId: string, method: PaymentMethod) {
   return apiFetch<{ transaction: Transaction }>(`/api/checkout/${transactionId}/pay`, {
     method: "POST",
     token,
@@ -250,7 +257,7 @@ export async function simulateDemoCredit(input: { saId: string; bureau: "transun
 
 export async function createDemoOrder(
   token: string,
-  input: { customerId: string; items: Array<{ productId: string; qty: number }>; delivery: DeliveryDetails; paymentMethod: "card" },
+  input: { customerId: string; items: Array<{ productId: string; qty: number }>; delivery: DeliveryDetails; paymentMethod: PaymentMethod },
 ) {
   return apiFetch<{ transaction: Transaction; qrPayload: string }>("/api/pondo/orders", { method: "POST", token, body: JSON.stringify(input) });
 }
@@ -266,7 +273,7 @@ export async function bnplVetDemoOrder(token: string, id: string, input: { saId:
 export async function payDemoOrder(
   token: string,
   id: string,
-  paymentMethod: "card",
+  paymentMethod: PaymentMethod,
   options?: { settlementBank?: SettlementBank; notifyEmail?: string; notifyChannels?: Array<"sms" | "email"> },
 ) {
   return apiFetch<{ transaction: Transaction; settlement: PaymentSettlement; notifications: PaymentNotification[] }>(
@@ -293,6 +300,27 @@ export async function sponsorDemoSummary(token: string) {
 
 export async function sponsorDemoOrders(token: string) {
   return apiFetch<{ items: Array<Transaction & { live?: boolean; details?: unknown }> }>("/api/pondo/sponsor/orders", { token });
+}
+
+export async function topUpWallet(
+  token: string,
+  input: {
+    customerId: string;
+    amountCents: number;
+    paymentMethod: PaymentMethod;
+    settlementBank?: SettlementBank;
+    notifyEmail?: string;
+  },
+) {
+  return apiFetch<WalletTopUpResult>("/api/pondo/wallet/top-up", {
+    method: "POST",
+    token,
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getWalletBalance(token: string, customerId: string) {
+  return apiFetch<{ customerId: string; balanceCents: number }>(`/api/pondo/wallet/${encodeURIComponent(customerId)}`, { token });
 }
 
 export function sponsorDemoEventSource(token: string) {

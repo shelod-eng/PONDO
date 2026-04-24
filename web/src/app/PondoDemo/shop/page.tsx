@@ -33,7 +33,7 @@ function resolveBadge(p: DemoProduct) {
   if (p.stock <= 6) {
     return { label: "LOW STOCK", tone: "bg-[#a0522d] text-white" };
   }
-  return { label: "KYC VERIFIED", tone: "bg-[var(--pondo-navy-900)] text-white" };
+  return { label: "KYC VERIFIED", tone: "bg-pondo-navy-900 text-white" };
 }
 
 function ProductCard({
@@ -58,9 +58,9 @@ function ProductCard({
   const reviewCount = Math.round(p.rating * 1000);
 
   return (
-    <article className="overflow-hidden rounded-2xl border border-[var(--pondo-line)] bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
+    <article className="overflow-hidden rounded-2xl border border-pondo-line bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
       <div
-        className="relative h-44 bg-[var(--pondo-surface-soft)]"
+        className="relative h-44 bg-pondo-surface-soft"
         style={{
           backgroundImage: `url(${image})`,
           backgroundSize: "cover",
@@ -79,24 +79,24 @@ function ProductCard({
           className={`absolute right-3 top-3 rounded-full border px-2 py-1 text-xs font-bold ${
             isWishlisted
               ? "border-[#a0522d] bg-[#a0522d] text-white"
-              : "border-white/70 bg-white/90 text-[var(--pondo-navy-900)]"
+              : "border-white/70 bg-white/90 text-pondo-navy-900"
           }`}
         >
-          {isWishlisted ? "♥" : "♡"}
+          {isWishlisted ? "â™¥" : "â™¡"}
         </button>
       </div>
 
       <div className="space-y-2 p-4">
         <div className="text-xs font-semibold text-slate-500">{p.brand}</div>
-        <h3 className="line-clamp-2 text-lg font-bold text-[var(--pondo-navy-900)]">{p.name}</h3>
+        <h3 className="line-clamp-2 text-lg font-bold text-pondo-navy-900">{p.name}</h3>
 
         <div className="flex items-center gap-2 text-xs text-slate-500">
-          <span className="font-semibold text-[var(--pondo-orange-500)]">{ratingLabel(p.rating)}</span>
+          <span className="font-semibold text-pondo-orange-500">{ratingLabel(p.rating)}</span>
           <span>{reviewCount} verified reviews</span>
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="text-3xl font-black text-[var(--pondo-orange-500)]">
+          <div className="text-3xl font-black text-pondo-orange-500">
             {money(discounted)}
           </div>
           {p.discountPct > 0 ? (
@@ -106,7 +106,7 @@ function ProductCard({
 
         <div className="text-xs font-semibold text-emerald-700">Trust {trustScore}%</div>
         <div className="text-xs text-slate-500">{deliveryMessage}</div>
-        <div className="text-xs text-[var(--pondo-orange-500)]">
+        <div className="text-xs text-pondo-orange-500">
           Only {Math.max(3, p.stock)} left in stock
         </div>
 
@@ -114,14 +114,14 @@ function ProductCard({
           <button
             type="button"
             onClick={onAdd}
-            className="rounded-xl bg-[var(--pondo-navy-900)] px-3 py-2 text-sm font-bold text-white hover:bg-[var(--pondo-navy-800)]"
+            className="rounded-xl bg-pondo-navy-900 px-3 py-2 text-sm font-bold text-white hover:bg-pondo-navy-800"
           >
             Add to Cart
           </button>
           <button
             type="button"
             onClick={onBuy}
-            className="rounded-xl bg-[var(--pondo-orange-500)] px-3 py-2 text-sm font-bold text-white hover:bg-[var(--pondo-orange-400)]"
+            className="rounded-xl bg-pondo-orange-500 px-3 py-2 text-sm font-bold text-white hover:bg-pondo-orange-400"
           >
             Buy Now
           </button>
@@ -260,7 +260,7 @@ export default function ShopPage() {
                   const grid = document.getElementById("pondo-product-grid");
                   if (grid) grid.scrollIntoView({ behavior: "smooth", block: "start" });
                 }}
-                className="rounded-lg bg-[var(--pondo-orange-500)] px-4 py-2 text-sm font-bold text-white hover:bg-[var(--pondo-orange-400)]"
+                className="rounded-lg bg-pondo-orange-500 px-4 py-2 text-sm font-bold text-white hover:bg-pondo-orange-400"
               >
                 Explore Products
               </button>
@@ -275,7 +275,7 @@ export default function ShopPage() {
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-xl border border-[#2d4478] bg-[var(--pondo-navy-900)] text-white shadow-md">
+        <section className="overflow-hidden rounded-xl border border-[#2d4478] bg-pondo-navy-900 text-white shadow-md">
           <div className="flex flex-wrap items-center gap-3 px-4 py-3">
             <div className="min-w-[220px]">
               <div className="text-lg font-black leading-none">PONDO</div>
@@ -305,7 +305,7 @@ export default function ShopPage() {
                 type="button"
                 onClick={() => void load(q, category)}
                 disabled={busy}
-                className="rounded-md bg-[var(--pondo-orange-500)] px-4 py-2 text-sm font-bold text-white hover:bg-[var(--pondo-orange-400)] disabled:opacity-60"
+                className="rounded-md bg-pondo-orange-500 px-4 py-2 text-sm font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60"
               >
                 {busy ? "..." : "Search"}
               </button>
@@ -320,7 +320,7 @@ export default function ShopPage() {
               }}
               className={`rounded-md px-3 py-1.5 font-semibold transition ${
                 category === ""
-                  ? "bg-[var(--pondo-orange-500)] text-white"
+                  ? "bg-pondo-orange-500 text-white"
                   : "text-slate-100 hover:bg-white/10"
               }`}
             >
@@ -336,7 +336,7 @@ export default function ShopPage() {
                 }}
                 className={`rounded-md px-3 py-1.5 font-semibold transition ${
                   category === itemCategory
-                    ? "bg-[var(--pondo-orange-500)] text-white"
+                    ? "bg-pondo-orange-500 text-white"
                     : "text-slate-100 hover:bg-white/10"
                 }`}
               >
@@ -355,9 +355,9 @@ export default function ShopPage() {
           {metrics.map((metric) => (
             <div
               key={metric.label}
-              className="rounded-xl border border-[var(--pondo-line)] bg-white p-4 shadow-sm"
+              className="rounded-xl border border-pondo-line bg-white p-4 shadow-sm"
             >
-              <div className="mt-1 text-4xl font-black text-[var(--pondo-navy-900)]">
+              <div className="mt-1 text-4xl font-black text-pondo-navy-900">
                 {metric.value}
               </div>
               <div className="text-sm text-slate-500">{metric.label}</div>
@@ -371,15 +371,15 @@ export default function ShopPage() {
           </div>
         ) : null}
 
-        <section className="mt-4 rounded-xl border border-[var(--pondo-line)] bg-white p-4">
-          <div className="mb-3 text-sm font-semibold text-[var(--pondo-navy-900)]">
+        <section className="mt-4 rounded-xl border border-pondo-line bg-white p-4">
+          <div className="mb-3 text-sm font-semibold text-pondo-navy-900">
             Fulfilment Partner Integrations
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
             {["Amazon SA", "Takealot", "Temu", "Shopify", "WooCommerce"].map((partner) => (
               <div
                 key={partner}
-                className="rounded-lg border border-[var(--pondo-line)] bg-[#f7faff] px-3 py-2 text-center text-sm font-bold text-[var(--pondo-navy-800)]"
+                className="rounded-lg border border-pondo-line bg-[#f7faff] px-3 py-2 text-center text-sm font-bold text-pondo-navy-800"
               >
                 {partner}
               </div>
@@ -389,7 +389,7 @@ export default function ShopPage() {
 
         <section id="pondo-product-grid" className="mt-5">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-4xl font-black text-[var(--pondo-navy-900)]">All Products</h2>
+            <h2 className="text-4xl font-black text-pondo-navy-900">All Products</h2>
             <div className="flex items-center gap-3 text-sm text-slate-500">
               <span>{sortedProducts.length} results</span>
               {hasFilters ? (
@@ -401,7 +401,7 @@ export default function ShopPage() {
                     setSortBy("featured");
                     void load("", "");
                   }}
-                  className="rounded-md border border-[var(--pondo-line)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--pondo-navy-800)] hover:bg-[#eef3ff]"
+                  className="rounded-md border border-pondo-line bg-white px-3 py-1.5 text-xs font-semibold text-pondo-navy-800 hover:bg-[#eef3ff]"
                 >
                   Clear filters
                 </button>
@@ -411,7 +411,7 @@ export default function ShopPage() {
                 <select
                   value={sortBy}
                   onChange={(event) => setSortBy(event.target.value)}
-                  className="rounded-md border border-[var(--pondo-line)] bg-white px-2 py-1.5 text-sm text-slate-700"
+                  className="rounded-md border border-pondo-line bg-white px-2 py-1.5 text-sm text-slate-700"
                 >
                   <option value="featured">Featured</option>
                   <option value="rating">Top Rated</option>
@@ -423,8 +423,8 @@ export default function ShopPage() {
           </div>
 
           {isEmpty ? (
-            <div className="rounded-2xl border border-dashed border-[var(--pondo-line)] bg-white p-10 text-center">
-              <div className="text-2xl font-black text-[var(--pondo-navy-900)]">
+            <div className="rounded-2xl border border-dashed border-pondo-line bg-white p-10 text-center">
+              <div className="text-2xl font-black text-pondo-navy-900">
                 No products match these filters.
               </div>
               <p className="mt-2 text-sm text-slate-600">
@@ -438,7 +438,7 @@ export default function ShopPage() {
                   setSortBy("featured");
                   void load("", "");
                 }}
-                className="mt-4 rounded-lg bg-[var(--pondo-navy-900)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--pondo-navy-800)]"
+                className="mt-4 rounded-lg bg-pondo-navy-900 px-4 py-2 text-sm font-semibold text-white hover:bg-pondo-navy-800"
               >
                 Show full catalog
               </button>
@@ -472,27 +472,27 @@ export default function ShopPage() {
       <button
         type="button"
         onClick={() => setCartPanelOpen(true)}
-        className="fixed bottom-5 right-5 z-20 rounded-full bg-[var(--pondo-navy-900)] px-4 py-3 text-sm font-extrabold text-white shadow-lg hover:bg-[var(--pondo-navy-800)]"
+        className="fixed bottom-5 right-5 z-20 rounded-full bg-pondo-navy-900 px-4 py-3 text-sm font-extrabold text-white shadow-lg hover:bg-pondo-navy-800"
       >
         Cart ({cartCount})
       </button>
 
       {cartPanelOpen ? (
         <div className="fixed inset-0 z-30 flex justify-end bg-black/40">
-          <div className="h-full w-full max-w-md border-l border-[var(--pondo-line)] bg-white p-4 shadow-2xl">
+          <div className="h-full w-full max-w-md border-l border-pondo-line bg-white p-4 shadow-2xl">
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-xl font-black text-[var(--pondo-navy-900)]">Verified Cart</h3>
+              <h3 className="text-xl font-black text-pondo-navy-900">Verified Cart</h3>
               <button
                 type="button"
                 onClick={() => setCartPanelOpen(false)}
-                className="rounded-md border border-[var(--pondo-line)] px-3 py-1 text-sm font-semibold text-[var(--pondo-navy-800)] hover:bg-[#eef3ff]"
+                className="rounded-md border border-pondo-line px-3 py-1 text-sm font-semibold text-pondo-navy-800 hover:bg-[#eef3ff]"
               >
                 Close
               </button>
             </div>
 
             {cartLines.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-[var(--pondo-line)] bg-[#fbfdff] p-6 text-center text-sm text-slate-600">
+              <div className="rounded-xl border border-dashed border-pondo-line bg-[#fbfdff] p-6 text-center text-sm text-slate-600">
                 Your cart is empty. Add products from the grid.
               </div>
             ) : (
@@ -500,31 +500,31 @@ export default function ShopPage() {
                 {cartLines.map((line) => (
                   <div
                     key={line.product.id}
-                    className="rounded-xl border border-[var(--pondo-line)] bg-[#fbfdff] p-3"
+                    className="rounded-xl border border-pondo-line bg-[#fbfdff] p-3"
                   >
-                    <div className="text-sm font-bold text-[var(--pondo-navy-900)]">
+                    <div className="text-sm font-bold text-pondo-navy-900">
                       {line.product.name}
                     </div>
                     <div className="mt-1 text-xs text-slate-500">{line.product.brand}</div>
                     <div className="mt-2 flex items-center justify-between">
-                      <div className="text-sm font-semibold text-[var(--pondo-orange-500)]">
+                      <div className="text-sm font-semibold text-pondo-orange-500">
                         {money(line.lineCents)}
                       </div>
-                      <div className="flex items-center rounded-lg border border-[var(--pondo-line)] bg-white">
+                      <div className="flex items-center rounded-lg border border-pondo-line bg-white">
                         <button
                           type="button"
                           onClick={() => cart.setQty(line.product.id, Math.max(1, line.qty - 1))}
-                          className="px-3 py-1 text-sm font-bold text-[var(--pondo-navy-800)]"
+                          className="px-3 py-1 text-sm font-bold text-pondo-navy-800"
                         >
                           -
                         </button>
-                        <span className="px-2 text-sm font-bold text-[var(--pondo-navy-900)]">
+                        <span className="px-2 text-sm font-bold text-pondo-navy-900">
                           {line.qty}
                         </span>
                         <button
                           type="button"
                           onClick={() => cart.setQty(line.product.id, line.qty + 1)}
-                          className="px-3 py-1 text-sm font-bold text-[var(--pondo-navy-800)]"
+                          className="px-3 py-1 text-sm font-bold text-pondo-navy-800"
                         >
                           +
                         </button>
@@ -542,7 +542,7 @@ export default function ShopPage() {
               </div>
             )}
 
-            <div className="mt-4 rounded-xl border border-[var(--pondo-line)] bg-[var(--pondo-navy-900)] p-4 text-white">
+            <div className="mt-4 rounded-xl border border-pondo-line bg-pondo-navy-900 p-4 text-white">
               <div className="flex items-center justify-between text-sm">
                 <span>{cartCount} items</span>
                 <span className="font-black">{money(cartSubtotalCents)}</span>
@@ -559,7 +559,7 @@ export default function ShopPage() {
                   type="button"
                   onClick={() => router.push("/PondoDemo/checkout")}
                   disabled={cartLines.length === 0}
-                  className="rounded-lg bg-[var(--pondo-orange-500)] px-3 py-2 text-sm font-bold text-white hover:bg-[var(--pondo-orange-400)] disabled:opacity-60"
+                  className="rounded-lg bg-pondo-orange-500 px-3 py-2 text-sm font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60"
                 >
                   Proceed to Verified Checkout
                 </button>
@@ -571,3 +571,4 @@ export default function ShopPage() {
     </div>
   );
 }
+

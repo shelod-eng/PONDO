@@ -1,5 +1,6 @@
 import { findProduct } from "./catalog.js";
 import { createSignedPayload } from "../qr.js";
+import { pickGatewayForPaymentMethod, paymentMethodRequiresCreditVet } from "../payment-config.js";
 
 const DELIVERY_PROCESS_STEPS = [
   { title: "Dispatch Initiation", detail: "Email, WhatsApp, and SMS dispatches confirm that the order is in route." },
@@ -15,9 +16,22 @@ const BUSINESS_BANK_ACCOUNTS = {
   standard_bank: { bankLabel: "Standard Bank Business Account", accountRef: "STD-***-5560" },
 };
 
+const PAYMENT_SUCCESS_MESSAGE = {
+  card: "Card payment settled successfully.",
+  card_3ds: "3DS card authorization completed successfully.",
+  debit_card: "Debit card payment settled successfully.",
+  eft: "Instant EFT payment settled successfully.",
+  payfast: "PayFast payment settled successfully.",
+  bnpl: "BNPL authorization approved and settled successfully.",
+  speedpoint: "Speedpoint SoftPOS payment settled successfully.",
+  ussd: "USSD payment confirmed successfully.",
+  evoucher_wallet: "eVoucher Wallet payment settled successfully.",
+};
+
 export function createOrderService({ storage, eventHub, secret }) {
   const orderDetails = new Map(); // transactionId -> { items, delivery, saId?, bureau?, live }
   const deliveryProcess = new Map(); // transactionId -> { startedAtMs, stepDurationMs, startedBy }
+  const walletBalances = new Map(); // customerId -> amountCents
 
   function computeAmount(items) {
     let total = 0;
@@ -82,17 +96,24 @@ export function createOrderService({ storage, eventHub, secret }) {
     const tx = await storage.getTransaction(id);
     if (!tx) return null;
 
-    const needsBnpl = paymentMethod === "bnpl";
-    const eligible = !needsBnpl || tx.credit_tier === "A" || tx.credit_tier === "B";
+    const gateway = pickGatewayForPaymentMethod(paymentMethod, tx.gateway);
+    const needsCreditVet = paymentMethodRequiresCreditVet(paymentMethod);
+    const eligible = !needsCreditVet || tx.credit_tier === "A" || tx.credit_tier === "B";
     if (!eligible) {
-      const declined = await storage.updateTransaction(id, { payment_method: paymentMethod, gateway_status: "declined", status: "failed" });
-      await storage.addAuditEntry(id, { actor, action: "payment.declined", data: { paymentMethod } });
+      const declined = await storage.updateTransaction(id, {
+        payment_method: paymentMethod,
+        gateway,
+        gateway_status: "declined",
+        status: "failed",
+      });
+      await storage.addAuditEntry(id, { actor, action: "payment.declined", data: { paymentMethod, gateway } });
       eventHub.send("order.updated", { id, status: declined?.status, gateway_status: declined?.gateway_status, live: true });
       return { transaction: declined, settlement: null, notifications: [] };
     }
 
     const updated = await storage.updateTransaction(id, {
       payment_method: paymentMethod,
+      gateway,
       gateway_status: "settled",
       status: "reconciled",
       external_ref: `live_${id.slice(0, 8)}`,
@@ -114,13 +135,13 @@ export function createOrderService({ storage, eventHub, secret }) {
       destination: channel === "email" ? notifyEmail : "+27XXXXXXXXX",
       status: "sent",
       sentAt: new Date().toISOString(),
-      message: `Payment successful. Funds settled into ${settlement.bankLabel} (${settlement.accountRef}).`,
+      message: `${PAYMENT_SUCCESS_MESSAGE[paymentMethod] || "Payment successful."} Funds settled into ${settlement.bankLabel} (${settlement.accountRef}).`,
     }));
 
     const detail = orderDetails.get(id) || { items: [], delivery: {}, live: true };
     orderDetails.set(id, { ...detail, settlement, notifications });
 
-    await storage.addAuditEntry(id, { actor, action: "payment.settled", data: { paymentMethod } });
+    await storage.addAuditEntry(id, { actor, action: "payment.settled", data: { paymentMethod, gateway } });
     await storage.addAuditEntry(id, {
       actor: "system",
       action: "payment.settled_to_business_account",
@@ -142,6 +163,71 @@ export function createOrderService({ storage, eventHub, secret }) {
       notifications,
     });
     return { transaction: updated, settlement, notifications };
+  }
+
+  async function topUpWallet({
+    actor,
+    customerId,
+    amountCents,
+    paymentMethod,
+    settlementBank = "absa",
+    notifyEmail = null,
+  }) {
+    const id = storage.newId();
+    const gateway = pickGatewayForPaymentMethod(paymentMethod);
+    const now = new Date().toISOString();
+    const nextBalance = (walletBalances.get(customerId) || 0) + amountCents;
+    walletBalances.set(customerId, nextBalance);
+
+    const tx = await storage.createTransaction({
+      id,
+      customer_id: customerId,
+      amount_cents: amountCents,
+      currency: "ZAR",
+      payment_method: paymentMethod,
+      gateway,
+      gateway_status: "settled",
+      credit_tier: null,
+      qr_payload: createSignedPayload({ transactionId: id, amountCents, currency: "ZAR", customerId }, secret),
+      status: "reconciled",
+    });
+
+    const safeBank = BUSINESS_BANK_ACCOUNTS[settlementBank] ? settlementBank : "absa";
+    const settlement = {
+      bank: safeBank,
+      bankLabel: BUSINESS_BANK_ACCOUNTS[safeBank].bankLabel,
+      accountRef: BUSINESS_BANK_ACCOUNTS[safeBank].accountRef,
+      settledAt: now,
+      amountCents,
+      currency: "ZAR",
+    };
+
+    orderDetails.set(id, {
+      type: "wallet_topup",
+      walletBalanceCents: nextBalance,
+      settlement,
+      live: true,
+    });
+
+    await storage.addAuditEntry(id, {
+      actor,
+      action: "wallet.topup.completed",
+      data: { paymentMethod, gateway, walletBalanceCents: nextBalance, settlement, notifyEmail },
+    });
+
+    eventHub.send("order.updated", {
+      id,
+      status: tx.status,
+      gateway_status: tx.gateway_status,
+      live: true,
+      walletBalanceCents: nextBalance,
+    });
+
+    return { transaction: tx, settlement, walletBalanceCents: nextBalance };
+  }
+
+  function getWalletBalance(customerId) {
+    return walletBalances.get(customerId) || 0;
   }
 
   async function startDeliveryProcess({ actor, id }) {
@@ -224,5 +310,14 @@ export function createOrderService({ storage, eventHub, secret }) {
     return { transaction: tx, details: orderDetails.get(id) || null, audit, process };
   }
 
-  return { createOrder, attachCreditVet, authorizePayment, listLiveOrders, getOrder, getDeliveryProcess };
+  return {
+    createOrder,
+    attachCreditVet,
+    authorizePayment,
+    topUpWallet,
+    getWalletBalance,
+    listLiveOrders,
+    getOrder,
+    getDeliveryProcess,
+  };
 }

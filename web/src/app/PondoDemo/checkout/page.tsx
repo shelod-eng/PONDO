@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -20,7 +20,8 @@ import {
   type SettlementBank,
   verifyOtp,
 } from "@/lib/api";
-import { fetchGeoLocation, type GeoLocation } from "@/lib/geolocation";
+import { PAYMENT_METHOD_OPTIONS, type PaymentMethod, paymentMethodLabel } from "@/lib/paymentMethods";
+import { fetchGeoLocation } from "@/lib/geolocation";
 import { useAuth } from "@/lib/auth";
 import { usePondoCart } from "@/lib/pondoCart";
 import { FALLBACK_IMAGE, FALLBACK_PRODUCTS, IMAGE_BY_PRODUCT } from "@/lib/demoCatalog";
@@ -53,7 +54,7 @@ const confirmationSteps = [
   },
   {
     title: "Conclusion",
-    detail: "Yoco or Vodacom SoftPOS card payment success closes the journey and triggers invoicing.",
+    detail: "Successful payment confirmation closes the journey and triggers invoicing.",
   },
 ];
 
@@ -79,6 +80,10 @@ const journeyVideoFrames = [
     detail: "Transaction reaches cleared status pending physical fulfillment.",
   },
 ];
+
+const CUSTOMER_PAYMENT_OPTIONS = PAYMENT_METHOD_OPTIONS.filter(
+  (option) => !["bnpl", "ussd", "evoucher_wallet"].includes(option.id),
+);
 
 type VetResult = {
   transunionScore: number;
@@ -121,10 +126,10 @@ function Stepper({ step, step3Label }: { step: number; step3Label: string }) {
         const active = current <= step;
         return (
           <div key={label} className="flex flex-col items-center gap-2">
-            <div className={["h-7 w-7 rounded-full border text-xs font-bold leading-7", active ? "border-[var(--pondo-orange-500)] bg-[var(--pondo-orange-500)] text-white" : "border-[var(--pondo-line)] text-slate-500"].join(" ")}>
+            <div className={["h-7 w-7 rounded-full border text-xs font-bold leading-7", active ? "border-pondo-orange-500 bg-pondo-orange-500 text-white" : "border-pondo-line text-slate-500"].join(" ")}>
               {current}
             </div>
-            <div className={active ? "text-[var(--pondo-navy-700)]" : "text-slate-500"}>{label}</div>
+            <div className={active ? "text-pondo-navy-700" : "text-slate-500"}>{label}</div>
           </div>
         );
       })}
@@ -159,12 +164,12 @@ export default function PondoCheckoutPage() {
   const [capturedCity, setCapturedCity] = useState("");
   const [capturedProvince, setCapturedProvince] = useState("");
   const [capturedPostalCode, setCapturedPostalCode] = useState("");
-  const [geoLocationData, setGeoLocationData] = useState<GeoLocation | null>(null);
   const [geoLocationLoading, setGeoLocationLoading] = useState(false);
   const [saidTouched, setSaidTouched] = useState(false);
 
   const [vetResult, setVetResult] = useState<VetResult | null>(null);
   const [routeDecision, setRouteDecision] = useState<RouteDecision | null>(null);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>("card");
   const [settlementBank, setSettlementBank] = useState<SettlementBank>("absa");
   const [paymentSettlement, setPaymentSettlement] = useState<PaymentSettlement | null>(null);
   const [completedOrderId, setCompletedOrderId] = useState("");
@@ -173,7 +178,7 @@ export default function PondoCheckoutPage() {
   const [journeyFrame, setJourneyFrame] = useState(0);
   const [playJourney, setPlayJourney] = useState(false);
 
-  const [apiLogs, setApiLogs] = useState<string[]>(["Awaiting transaction initiation..."]);
+  const [, setApiLogs] = useState<string[]>(["Awaiting transaction initiation..."]);
 
   const customer = session?.customer || null;
   const cartCount = cart.count;
@@ -234,10 +239,9 @@ export default function PondoCheckoutPage() {
     setGeoLocationLoading(true);
     fetchGeoLocation()
       .then((geo) => {
-        setGeoLocationData(geo);
-        if (geo) {
-          setCapturedCity(geo.city);
-          setCapturedProvince(geo.province);
+          if (geo) {
+            setCapturedCity(geo.city);
+            setCapturedProvince(geo.province);
           setCapturedPostalCode(geo.postalCode);
         }
         log(`Geolocation detected: ${geo?.city}, ${geo?.province}`);
@@ -276,19 +280,17 @@ export default function PondoCheckoutPage() {
     return Math.round((cartSubtotalCents * pct) / 100);
   }, [cartSubtotalCents, routeDecision]);
 
-  const selectedProfileHint = useMemo(() => {
-    if (email === "amara@email.com") {
-      return "Recommended: This profile is configured to pass KYC, ITC, affordability, and fraud thresholds in demo mode.";
-    }
-    return "This profile may pass or fail depending on ITC and affordability checks.";
-  }, [email]);
+  const selectedPaymentMethodMeta = useMemo(
+    () => CUSTOMER_PAYMENT_OPTIONS.find((option) => option.id === selectedPaymentMethod) || CUSTOMER_PAYMENT_OPTIONS[0],
+    [selectedPaymentMethod],
+  );
   const normalizedIdNumber = capturedIdNumber.replace(/\D/g, "");
   const isSaidComplete = normalizedIdNumber.length === 13;
   const isSaidValid = isSaidComplete && validateSAID(normalizedIdNumber);
   const showSaidFeedback = saidTouched || isSaidComplete;
 
   const primaryCtaClass =
-    "w-full rounded-xl bg-gradient-to-r from-[var(--pondo-orange-500)] to-[#d95a18] px-4 py-3 text-lg font-bold text-white shadow-[0_8px_18px_rgba(217,90,24,0.32)] hover:from-[var(--pondo-orange-400)] hover:to-[var(--pondo-orange-500)] disabled:opacity-60";
+    "w-full rounded-xl bg-gradient-to-r from-[#d64534] to-[#d95a18] px-4 py-3 text-lg font-bold text-white shadow-[0_8px_18px_rgba(217,90,24,0.32)] hover:from-[#ea6a3f] hover:to-[#d64534] disabled:opacity-60";
 
   const driverArrivedOnSite = useMemo(() => {
     if (!deliveryProcessSnapshot) return false;
@@ -313,7 +315,7 @@ export default function PondoCheckoutPage() {
           deliveryProcessSnapshot.status === "completed"
             ? "Partner confirmation completed"
             : `${session?.partnerLabel || "Partner"} fulfilment is active`,
-        helperText: `PONDO is tracking ${session?.partnerLabel || "partner"} dispatch, driver movement, on-site verification, and SoftPOS payment confirmation in the background.`,
+        helperText: `PONDO is tracking ${session?.partnerLabel || "partner"} dispatch, driver movement, on-site verification, and ${selectedPaymentMethodMeta.label} payment confirmation in the background.`,
         steps: steps.map((item, idx) => ({
           ...item,
           status: deliveryProcessSnapshot.steps[idx]?.status || item.status,
@@ -328,7 +330,7 @@ export default function PondoCheckoutPage() {
         progressPct: 12,
         processLabel: `${session?.partnerLabel || "Partner"} route confirmed`,
         helperText:
-          "Third-party ITC, KYC, affordability, and fraud checks succeeded. Partner dispatch tracking is primed and will advance automatically when fulfilment events and Yoco or Vodacom SoftPOS payment signals are received.",
+          "Third-party ITC, KYC, affordability, and fraud checks succeeded. Partner dispatch tracking is primed and will advance automatically when fulfilment events and the selected payment method signal are received.",
         steps: steps.map((item, idx) => ({
           ...item,
           status: idx === 0 ? ("active" as const) : item.status,
@@ -343,7 +345,7 @@ export default function PondoCheckoutPage() {
       helperText: "",
       steps,
     };
-  }, [deliveryProcessSnapshot, routeDecision, session?.partnerLabel, vetResult?.approved]);
+  }, [deliveryProcessSnapshot, routeDecision, selectedPaymentMethodMeta.label, session?.partnerLabel, vetResult?.approved]);
 
   function log(message: string) {
     setApiLogs((prev) => [`${ts()} ${message}`, ...prev].slice(0, 40));
@@ -495,9 +497,9 @@ export default function PondoCheckoutPage() {
             province: capturedProvince,
             postalCode: capturedPostalCode,
           },
-          paymentMethod: "card",
+          paymentMethod: selectedPaymentMethod,
         });
-        const pay = await payDemoOrder(authToken, order.transaction.id, "card", {
+        const pay = await payDemoOrder(authToken, order.transaction.id, selectedPaymentMethod, {
           settlementBank,
           notifyEmail: "shelod@gmail.com",
           notifyChannels: ["sms", "email"],
@@ -520,12 +522,12 @@ export default function PondoCheckoutPage() {
       setCompletedOrderId(submitted.order.transaction.id);
       setPaymentSettlement(submitted.pay.settlement);
       log(`Transaction cleared: ${submitted.order.transaction.id}`);
-      log("Yoco / Vodacom SoftPOS card payment confirmed");
+      log(`Payment method confirmed: ${paymentMethodLabel(selectedPaymentMethod)}`);
       log(`Funds settled to PONDO ${submitted.pay.settlement.bankLabel} (${submitted.pay.settlement.accountRef})`);
       log("Driver arrival and partner delivery confirmation tracking is running in the background.");
       log("Customer notification will be released only once on-site arrival is confirmed.");
       log(`Order submitted using ${cartLines.length} cart item(s)`);
-      log(`Webhook posted to ${session.partnerLabel}`);
+      log(`Webhook posted to ${session.partnerLabel} for ${paymentMethodLabel(selectedPaymentMethod)}`);
       log(`Partner-managed delivery tracking active - ETA ${routeDecision.etaMinutes} min`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "complete_failed");
@@ -535,10 +537,10 @@ export default function PondoCheckoutPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,#e9f1ff_0%,#f7faff_34%,#edf4ff_100%)] text-[var(--pondo-navy-900)]">
+    <div className="min-h-screen bg-[linear-gradient(180deg,#e9f1ff_0%,#f7faff_34%,#edf4ff_100%)] text-pondo-navy-900">
       <PondoDemoNav />
 
-      <div className="border-b border-[#324978] bg-[var(--pondo-navy-900)]">
+      <div className="border-b border-[#324978] bg-pondo-navy-900">
         <div className="mx-auto flex max-w-[1400px] items-center justify-between px-6 py-4">
           <div>
             <div className="text-xl font-black tracking-tight text-white">Live Delivery Tracker</div>
@@ -547,7 +549,7 @@ export default function PondoCheckoutPage() {
           <div className="grid grid-cols-3 gap-3 text-xs">
             <div className="rounded-full bg-emerald-100 px-4 py-2 text-center text-emerald-700"><span className="font-bold">3 Active Deliveries</span></div>
             <div className="rounded-lg bg-white/12 px-4 py-2 text-center"><div className="font-bold text-sky-200">2.4M+</div><div className="text-slate-100">Verified Txns</div></div>
-            <div className="rounded-lg bg-white/12 px-4 py-2 text-center"><div className="font-bold text-[var(--pondo-orange-400)]">4.2hrs</div><div className="text-slate-100">Avg Delivery</div></div>
+            <div className="rounded-lg bg-white/12 px-4 py-2 text-center"><div className="font-bold text-pondo-orange-400">4.2hrs</div><div className="text-slate-100">Avg Delivery</div></div>
           </div>
         </div>
       </div>
@@ -556,34 +558,34 @@ export default function PondoCheckoutPage() {
         <Stepper step={step} step3Label={step3Label} />
 
         <div className="grid gap-5 lg:grid-cols-[2fr_1fr]">
-          <div className="rounded-2xl border border-[var(--pondo-line)] bg-white p-5 shadow-lg">
+          <div className="rounded-2xl border border-pondo-line bg-white p-5 shadow-lg">
             {step === 1 ? (
               <div className="space-y-5">
-                <h1 className="text-3xl font-extrabold text-[var(--pondo-navy-900)]">Press Buy - Start Your Purchase</h1>
+                <h1 className="text-3xl font-extrabold text-pondo-navy-900">Press Buy - Start Your Purchase</h1>
                 <p className="text-sm text-slate-700">PONDO acts as your trusted checkout layer. We fetch your details from the partner eCommerce site and guide you through a secure, verified payment journey.</p>
-                <div className="overflow-hidden rounded-xl border border-[var(--pondo-line)] bg-[var(--pondo-surface-soft)]">
-                  <div className="flex items-center justify-between border-b border-[var(--pondo-line)] bg-[#f3f8ff] px-3 py-2">
-                    <div className="text-sm font-bold text-[var(--pondo-navy-900)]">Checkout Explainer Video (Storyboard)</div>
+                <div className="overflow-hidden rounded-xl border border-pondo-line bg-pondo-surface-soft">
+                  <div className="flex items-center justify-between border-b border-pondo-line bg-[#f3f8ff] px-3 py-2">
+                    <div className="text-sm font-bold text-pondo-navy-900">Checkout Explainer Video (Storyboard)</div>
                     <div className="text-xs text-slate-500">Frame {journeyFrame + 1} / {journeyVideoFrames.length}</div>
                   </div>
                   <div className="space-y-3 p-3">
-                    <div className="rounded-lg border border-[var(--pondo-line)] bg-white p-4">
-                      <div className="text-2xl font-black text-[var(--pondo-navy-900)]">{journeyVideoFrames[journeyFrame].title}</div>
+                    <div className="rounded-lg border border-pondo-line bg-white p-4">
+                      <div className="text-2xl font-black text-pondo-navy-900">{journeyVideoFrames[journeyFrame].title}</div>
                       <div className="mt-2 text-sm text-slate-700">{journeyVideoFrames[journeyFrame].detail}</div>
                     </div>
                     <div className="h-2 overflow-hidden rounded bg-[#dbe8ff]">
-                      <div className="h-full bg-[var(--pondo-orange-500)] transition-all duration-500" style={{ width: `${((journeyFrame + 1) / journeyVideoFrames.length) * 100}%` }} />
+                      <div className="h-full bg-pondo-orange-500 transition-all duration-500" style={{ width: `${((journeyFrame + 1) / journeyVideoFrames.length) * 100}%` }} />
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={() => setPlayJourney((v) => !v)}
-                        className="rounded-lg border border-[var(--pondo-line)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--pondo-navy-800)] hover:bg-[#edf4ff]"
+                        className="rounded-lg border border-pondo-line bg-white px-3 py-1.5 text-xs font-semibold text-pondo-navy-800 hover:bg-[#edf4ff]"
                       >
                         {playJourney ? "Pause" : "Play"} explainer
                       </button>
                       <button
                         onClick={() => setJourneyFrame((prev) => (prev + 1) % journeyVideoFrames.length)}
-                        className="rounded-lg border border-[var(--pondo-line)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--pondo-navy-800)] hover:bg-[#edf4ff]"
+                        className="rounded-lg border border-pondo-line bg-white px-3 py-1.5 text-xs font-semibold text-pondo-navy-800 hover:bg-[#edf4ff]"
                       >
                         Next frame
                       </button>
@@ -594,7 +596,7 @@ export default function PondoCheckoutPage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label>
                     <div className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-600">Select Partner eCommerce Site</div>
-                    <select value={partner} onChange={(e) => setPartner(e.target.value as PartnerName)} className="w-full rounded-lg border border-[var(--pondo-line)] bg-white px-3 py-2 text-slate-800">
+                    <select value={partner} onChange={(e) => setPartner(e.target.value as PartnerName)} className="w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-slate-800">
                       {partnerOptions.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.label}
@@ -604,7 +606,7 @@ export default function PondoCheckoutPage() {
                   </label>
                   <label>
                     <div className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-600">Your Account Email (Demo)</div>
-                    <select value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded-lg border border-[var(--pondo-line)] bg-white px-3 py-2 text-slate-800">
+                    <select value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-slate-800">
                       <option value="amara@email.com">amara@email.com (Amara Naidoo - Pass Profile)</option>
                       <option value="thabo@email.com">thabo@email.com (Thabo Nkosi)</option>
                       <option value="naledi@email.com">naledi@email.com (Naledi Dlamini)</option>
@@ -632,7 +634,7 @@ export default function PondoCheckoutPage() {
                     <input 
                       value={capturedFullName} 
                       onChange={(e) => setCapturedFullName(e.target.value)} 
-                      className="w-full rounded-lg border border-[var(--pondo-line)] px-3 py-2 text-slate-800" 
+                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800" 
                     />
                   </div>
                   <div>
@@ -653,7 +655,7 @@ export default function PondoCheckoutPage() {
                           ? isSaidValid
                             ? "border-emerald-500 bg-emerald-50/40"
                             : "border-red-400 bg-red-50/40"
-                          : "border-[var(--pondo-line)]",
+                          : "border-pondo-line",
                       ].join(" ")}
                     />
                     {showSaidFeedback ? (
@@ -673,7 +675,7 @@ export default function PondoCheckoutPage() {
                     <input 
                       value={capturedPhone} 
                       onChange={(e) => setCapturedPhone(e.target.value)} 
-                      className="w-full rounded-lg border border-[var(--pondo-line)] px-3 py-2 text-slate-800" 
+                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800" 
                     />
                   </div>
                   <div>
@@ -681,7 +683,7 @@ export default function PondoCheckoutPage() {
                     <input 
                       value={capturedEmail} 
                       onChange={(e) => setCapturedEmail(e.target.value)} 
-                      className="w-full rounded-lg border border-[var(--pondo-line)] px-3 py-2 text-slate-800" 
+                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800" 
                     />
                   </div>
                   <div>
@@ -689,7 +691,7 @@ export default function PondoCheckoutPage() {
                     <input 
                       value={capturedAddress} 
                       onChange={(e) => setCapturedAddress(e.target.value)} 
-                      className="w-full rounded-lg border border-[var(--pondo-line)] px-3 py-2 text-slate-800" 
+                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800" 
                     />
                   </div>
                   <div>
@@ -697,7 +699,7 @@ export default function PondoCheckoutPage() {
                     <input 
                       value={capturedPostalCode} 
                       onChange={(e) => setCapturedPostalCode(e.target.value)} 
-                      className="w-full rounded-lg border border-[var(--pondo-line)] px-3 py-2 text-slate-800" 
+                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800" 
                     />
                   </div>
                   <div>
@@ -706,7 +708,7 @@ export default function PondoCheckoutPage() {
                       value={capturedCity} 
                       onChange={(e) => setCapturedCity(e.target.value)} 
                       disabled={geoLocationLoading}
-                      className="w-full rounded-lg border border-[var(--pondo-line)] px-3 py-2 text-slate-800 disabled:bg-slate-50" 
+                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800 disabled:bg-slate-50" 
                     />
                   </div>
                   <div>
@@ -715,15 +717,15 @@ export default function PondoCheckoutPage() {
                       value={capturedProvince} 
                       onChange={(e) => setCapturedProvince(e.target.value)} 
                       disabled={geoLocationLoading}
-                      className="w-full rounded-lg border border-[var(--pondo-line)] px-3 py-2 text-slate-800 disabled:bg-slate-50" 
+                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800 disabled:bg-slate-50" 
                     />
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-[var(--pondo-line)] bg-[var(--pondo-surface-soft)] p-3">
-                  <div className="mb-2 text-sm font-bold text-[var(--pondo-navy-800)]">OTP Verification (Twilio SMS / SendGrid Email)</div>
+                <div className="rounded-xl border border-pondo-line bg-pondo-surface-soft p-3">
+                  <div className="mb-2 text-sm font-bold text-pondo-navy-800">OTP Verification (Twilio SMS / SendGrid Email)</div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <button onClick={onSendOtp} disabled={busy || !isSaidValid} className="rounded-lg bg-[var(--pondo-orange-500)] px-4 py-2 font-bold text-white hover:bg-[var(--pondo-orange-400)] disabled:opacity-60">Send OTP to {capturedPhone}</button>
+                    <button onClick={onSendOtp} disabled={busy || !isSaidValid} className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60">Send OTP to {capturedPhone}</button>
                     {demoOtp ? <div className="text-xs text-emerald-700">Demo OTP: {demoOtp}</div> : null}
                   </div>
                   {!isSaidValid ? (
@@ -732,14 +734,14 @@ export default function PondoCheckoutPage() {
                     </div>
                   ) : null}
                   <div className="mt-3 flex gap-2">
-                    <input value={otpInput} onChange={(e) => setOtpInput(e.target.value)} placeholder="Enter OTP" className="w-full rounded-lg border border-[var(--pondo-line)] bg-white px-3 py-2 text-slate-800" />
-                    <button onClick={onVerifyOtp} disabled={busy || !otpRequestId} className="rounded-lg bg-[var(--pondo-orange-500)] px-4 py-2 font-bold text-white hover:bg-[var(--pondo-orange-400)] disabled:opacity-60">Verify OTP</button>
+                    <input value={otpInput} onChange={(e) => setOtpInput(e.target.value)} placeholder="Enter OTP" className="w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-slate-800" />
+                    <button onClick={onVerifyOtp} disabled={busy || !otpRequestId} className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60">Verify OTP</button>
                   </div>
                   {otpVerified ? <div className="mt-2 text-sm font-semibold text-emerald-700">OTP verified - identity confirmed</div> : null}
                 </div>
 
-                <div className="rounded-xl border border-[var(--pondo-line)] bg-[var(--pondo-surface-soft)] p-3">
-                  <div className="mb-2 text-sm font-bold text-[var(--pondo-navy-800)]">Terms & Conditions - POPIA Compliant</div>
+                <div className="rounded-xl border border-pondo-line bg-pondo-surface-soft p-3">
+                  <div className="mb-2 text-sm font-bold text-pondo-navy-800">Terms & Conditions - POPIA Compliant</div>
                   <div className="max-h-28 overflow-y-auto rounded bg-white p-2 text-xs text-slate-600">
                     By proceeding, you consent to PONDO collecting and processing your personal information (name, SA ID, contact details, geo-location, financial data) for KYC verification, ITC credit checks, affordability assessment, and fraud detection in accordance with POPIA and internal risk controls.
                   </div>
@@ -774,7 +776,7 @@ export default function PondoCheckoutPage() {
               <div className="space-y-4">
                 <h2 className="text-2xl font-extrabold">Credit & KYC</h2>
                 <p className="text-sm text-slate-700">PONDO integrates with TransUnion, Experian, and third-party KYC providers to verify your identity and assess affordability before proceeding.</p>
-                <div className="rounded-xl border border-[var(--pondo-line)] bg-[var(--pondo-surface-soft)] text-slate-800">
+                <div className="rounded-xl border border-pondo-line bg-pondo-surface-soft text-slate-800">
                   <div className="border-b border-slate-300 px-4 py-3">TransUnion ITC Credit Check</div>
                   <div className="border-b border-slate-300 px-4 py-3">KYC Biometric Verification (ID + Face Match)</div>
                   <div className="border-b border-slate-300 px-4 py-3">Experian Affordability Vetting</div>
@@ -804,7 +806,7 @@ export default function PondoCheckoutPage() {
             {step === 4 && vetResult ? (
               <div className="space-y-4">
                 <h2 className="text-2xl font-extrabold">Checks Completed</h2>
-                <div className="rounded-xl border border-[var(--pondo-line)] bg-[var(--pondo-surface-soft)] text-slate-800">
+                <div className="rounded-xl border border-pondo-line bg-pondo-surface-soft text-slate-800">
                   <div className="flex items-center justify-between border-b border-slate-300 px-4 py-3"><span>TransUnion ITC Credit Check</span><span className="font-bold">Score: {vetResult.transunionScore} - {vetResult.transunionApproved ? "Approved" : "Declined"}</span></div>
                   <div className="flex items-center justify-between border-b border-slate-300 px-4 py-3"><span>KYC Biometric Verification</span><span className="font-bold">{vetResult.kycIdentityVerified ? "Identity Verified" : "Verification Failed"}</span></div>
                   <div className="flex items-center justify-between border-b border-slate-300 px-4 py-3"><span>Experian Affordability Vetting</span><span className="font-bold">Income {new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR", maximumFractionDigits: 0 }).format(vetResult.experianIncome)}/mo</span></div>
@@ -824,36 +826,52 @@ export default function PondoCheckoutPage() {
             {step === 5 && routeDecision ? (
               <div className="space-y-4">
                 <h2 className="text-2xl font-extrabold">Finalize Purchase</h2>
-                <div className="rounded-xl border border-[var(--pondo-line)] bg-[var(--pondo-surface-soft)] p-4">
-                  <div className="mb-2 text-sm font-bold text-[var(--pondo-navy-800)]">PED (Payment Enabled Delivery)</div>
+                <div className="rounded-xl border border-pondo-line bg-pondo-surface-soft p-4">
+                  <div className="mb-2 text-sm font-bold text-pondo-navy-800">PED (Payment Enabled Delivery)</div>
                   <div className="grid gap-2 text-sm sm:grid-cols-2">
                     <div>Driver: <span className="font-semibold">{routeDecision.driverName}</span></div>
                     <div>Badge: <span className="font-semibold">{routeDecision.driverBadge}</span></div>
                     <div>Vehicle: <span className="font-semibold">{routeDecision.vehicle}</span></div>
                     <div>ETA: <span className="font-semibold">{routeDecision.etaMinutes} min</span></div>
                   </div>
-                  <div className="mt-3 text-xs text-slate-600">PED device (Yoco/SoftPOS) active, KYC-cleared driver, vetted custody chain active.</div>
+                  <div className="mt-3 text-xs text-slate-600">PED device and payment rails are active, the driver is KYC-cleared, and the custody chain is verified.</div>
                 </div>
 
-                <div className="rounded-xl border border-[var(--pondo-orange-500)]/35 bg-[#fff6ea] px-4 py-3 text-sm text-[#914500]">
-                  Final T&C: By clicking &quot;Complete Purchase&quot; you confirm payment for {cartCount} cart item(s), total {money(finalCustomerShareCents)}, and consent to PED delivery.
+                <label className="block">
+                  <div className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-600">Payment Method</div>
+                  <select
+                    value={selectedPaymentMethod}
+                    onChange={(e) => setSelectedPaymentMethod(e.target.value as PaymentMethod)}
+                    className="w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-slate-800"
+                  >
+                    {CUSTOMER_PAYMENT_OPTIONS.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="mt-2 text-xs text-slate-500">{selectedPaymentMethodMeta.helper}</div>
+                </label>
+
+                <div className="rounded-xl border border-[#d64534]/35 bg-[#fff6ea] px-4 py-3 text-sm text-[#914500]">
+                  Final T&C: By clicking &quot;Complete Purchase&quot; you confirm payment for {cartCount} cart item(s), total {money(finalCustomerShareCents)}, using {selectedPaymentMethodMeta.label}, and consent to PED delivery.
                 </div>
                 <label>
                   <div className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-600">PONDO Settlement Account</div>
-                  <select value={settlementBank} onChange={(e) => setSettlementBank(e.target.value as SettlementBank)} className="w-full rounded-lg border border-[var(--pondo-line)] bg-white px-3 py-2 text-slate-800">
+                  <select value={settlementBank} onChange={(e) => setSettlementBank(e.target.value as SettlementBank)} className="w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-slate-800">
                     <option value="absa">ABSA Business Account</option>
                     <option value="fnb">FNB Business Account</option>
                     <option value="standard_bank">Standard Bank Business Account</option>
                   </select>
                 </label>
                 <div className="rounded-lg border border-emerald-500/30 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                  Final notification is released only after on-site arrival is confirmed and the Yoco or Vodacom SoftPOS card payment succeeds.
+                  Final notification is released only after on-site arrival is confirmed and the {selectedPaymentMethodMeta.label} payment succeeds.
                 </div>
 
                 <button
                   onClick={onCompletePurchase}
                   disabled={busy || Boolean(completedOrderId) || cartLines.length === 0}
-                  className="w-full rounded-xl bg-gradient-to-r from-[var(--pondo-orange-500)] to-[#d95a18] px-4 py-3 text-2xl font-extrabold text-white shadow-[0_10px_22px_rgba(217,90,24,0.35)] hover:from-[var(--pondo-orange-400)] hover:to-[var(--pondo-orange-500)] disabled:opacity-60"
+                  className="w-full rounded-xl bg-gradient-to-r from-[#d64534] to-[#d95a18] px-4 py-3 text-2xl font-extrabold text-white shadow-[0_10px_22px_rgba(217,90,24,0.35)] hover:from-[#ea6a3f] hover:to-[#d64534] disabled:opacity-60"
                 >
                   {busy ? "Processing..." : completedOrderId ? "Purchase Completed" : "Complete Purchase - Clear Transaction"}
                 </button>
@@ -863,7 +881,7 @@ export default function PondoCheckoutPage() {
                     Transaction cleared successfully. Order ID: <span className="font-mono">{completedOrderId}</span>
                     {paymentSettlement ? (
                       <div className="mt-2">
-                        Funds settled to <span className="font-semibold">{paymentSettlement.bankLabel}</span> ({paymentSettlement.accountRef}).
+                        {selectedPaymentMethodMeta.label} funds settled to <span className="font-semibold">{paymentSettlement.bankLabel}</span> ({paymentSettlement.accountRef}).
                       </div>
                     ) : null}
                     <div className="mt-3 flex gap-3">
@@ -879,16 +897,16 @@ export default function PondoCheckoutPage() {
           </div>
 
           <aside className="space-y-4">
-            <div className="rounded-2xl border border-[var(--pondo-line)] bg-white p-4">
-              <div className="mb-2 inline-block rounded bg-[var(--pondo-orange-500)] px-2 py-1 text-[11px] font-bold uppercase text-white">Cart Locked Checkout</div>
-              <div className="text-xl font-bold text-[var(--pondo-navy-900)]">Order Summary ({cartCount})</div>
+            <div className="rounded-2xl border border-pondo-line bg-white p-4">
+              <div className="mb-2 inline-block rounded bg-pondo-orange-500 px-2 py-1 text-[11px] font-bold uppercase text-white">Cart Locked Checkout</div>
+              <div className="text-xl font-bold text-pondo-navy-900">Order Summary ({cartCount})</div>
               <div className="mt-1 text-sm text-slate-600">Only cart items are shown and submitted for payment.</div>
               <div className="mt-3 space-y-2">
                 {cartLines.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-[var(--pondo-line)] bg-[#f7faff] px-3 py-2 text-sm text-slate-600">Your cart is empty.</div>
+                  <div className="rounded-lg border border-dashed border-pondo-line bg-[#f7faff] px-3 py-2 text-sm text-slate-600">Your cart is empty.</div>
                 ) : (
                   cartLines.map((line) => (
-                    <div key={line.product.id} className="grid grid-cols-[44px_1fr] gap-2 rounded-lg border border-[var(--pondo-line)] bg-[#f7faff] p-2">
+                    <div key={line.product.id} className="grid grid-cols-[44px_1fr] gap-2 rounded-lg border border-pondo-line bg-[#f7faff] p-2">
                       <div
                         className="h-11 w-11 rounded-md bg-slate-100"
                         style={{
@@ -898,19 +916,19 @@ export default function PondoCheckoutPage() {
                         }}
                       />
                       <div>
-                        <div className="text-sm font-bold text-[var(--pondo-navy-900)]">{line.product.name}</div>
+                        <div className="text-sm font-bold text-pondo-navy-900">{line.product.name}</div>
                         <div className="text-xs text-slate-600">Qty {line.qty} x {money(line.unitCents)}</div>
-                        <div className="mt-1 text-sm font-extrabold text-[var(--pondo-orange-500)]">{money(line.lineCents)}</div>
+                        <div className="mt-1 text-sm font-extrabold text-pondo-orange-500">{money(line.lineCents)}</div>
                       </div>
                     </div>
                   ))
                 )}
               </div>
-              <div className="mt-3 text-3xl font-extrabold text-[var(--pondo-orange-500)]">{money(cartSubtotalCents)}</div>
+              <div className="mt-3 text-3xl font-extrabold text-pondo-orange-500">{money(cartSubtotalCents)}</div>
             </div>
 
-            <div className="rounded-2xl border border-[var(--pondo-line)] bg-white p-4">
-              <div className="mb-2 text-sm font-bold uppercase tracking-widest text-[var(--pondo-navy-800)]">PONDO Trust Guarantee</div>
+            <div className="rounded-2xl border border-pondo-line bg-white p-4">
+              <div className="mb-2 text-sm font-bold uppercase tracking-widest text-pondo-navy-800">PONDO Trust Guarantee</div>
               <ul className="space-y-2 text-sm text-slate-700">
                 <li>TLS 1.3 End-to-End Encryption</li>
                 <li>KYC Identity Verified</li>
@@ -921,20 +939,11 @@ export default function PondoCheckoutPage() {
               </ul>
             </div>
 
-            <div className="rounded-2xl border border-[var(--pondo-line)] bg-white p-4">
-              <div className="mb-2 text-sm font-bold uppercase tracking-widest text-[var(--pondo-navy-800)]">Live API Activity Log</div>
-              <div className="h-48 overflow-y-auto rounded-lg border border-[var(--pondo-line)] bg-[var(--pondo-surface-soft)] p-3 font-mono text-xs text-[var(--pondo-navy-700)]">
-                {apiLogs.map((line, idx) => (
-                  <div key={`${line}-${idx}`} className="mb-1">{line}</div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-[var(--pondo-line)] bg-white p-4">
-              <div className="mb-2 text-sm font-bold uppercase tracking-widest text-[var(--pondo-navy-800)]">Partner Integrations</div>
+            <div className="rounded-2xl border border-pondo-line bg-white p-4">
+              <div className="mb-2 text-sm font-bold uppercase tracking-widest text-pondo-navy-800">Partner Integrations</div>
               <div className="flex flex-wrap gap-2 text-xs">
                 {["Amazon", "Temu", "Takealot", "Shopify", "WooCommerce", "TransUnion", "Experian", "Twilio", "SendGrid"].map((tag) => (
-                  <span key={tag} className="rounded border border-[var(--pondo-line)] bg-[var(--pondo-surface-soft)] px-2 py-1 text-slate-700">{tag}</span>
+                  <span key={tag} className="rounded border border-pondo-line bg-pondo-surface-soft px-2 py-1 text-slate-700">{tag}</span>
                 ))}
               </div>
             </div>
@@ -944,15 +953,15 @@ export default function PondoCheckoutPage() {
 
 
         {partnerTrackingView.show ? (
-          <section className="mt-6 rounded-2xl border border-[var(--pondo-line)] bg-white p-5 shadow-sm">
-            <h3 className="text-2xl font-black text-[var(--pondo-navy-900)]">Partner Delivery Confirmation Sequence</h3>
+          <section className="mt-6 rounded-2xl border border-pondo-line bg-white p-5 shadow-sm">
+            <h3 className="text-2xl font-black text-pondo-navy-900">Partner Delivery Confirmation Sequence</h3>
             <div className="mt-2 text-sm text-slate-600">
               {partnerTrackingView.processLabel} • {partnerTrackingView.progressPct}% complete
             </div>
             <div className="mt-2 text-sm text-slate-600">{partnerTrackingView.helperText}</div>
             <div className="mt-3 h-2 overflow-hidden rounded bg-[#dbe8ff]">
               <div
-                className="h-full bg-[var(--pondo-orange-500)] transition-all duration-500"
+                className="h-full bg-pondo-orange-500 transition-all duration-500"
                 style={{ width: `${partnerTrackingView.progressPct}%` }}
               />
             </div>
@@ -962,13 +971,13 @@ export default function PondoCheckoutPage() {
                   key={item.title}
                   className={[
                     "rounded-xl border p-4 transition",
-                    item.status === "completed" ? "border-emerald-300 bg-emerald-50" : item.status === "active" ? "border-[var(--pondo-orange-500)] bg-[#fff6ea]" : "border-[var(--pondo-line)] bg-[#f7faff]",
+                    item.status === "completed" ? "border-emerald-300 bg-emerald-50" : item.status === "active" ? "border-pondo-orange-500 bg-[#fff6ea]" : "border-pondo-line bg-[#f7faff]",
                   ].join(" ")}
                 >
                   <div className="text-xs font-black uppercase tracking-[0.15em] text-slate-500">Step {item.index}</div>
-                  <div className="mt-1 text-xl font-extrabold leading-tight text-[var(--pondo-navy-900)]">{item.title}</div>
+                  <div className="mt-1 text-xl font-extrabold leading-tight text-pondo-navy-900">{item.title}</div>
                   <div className="mt-2 text-sm text-slate-700">{item.detail}</div>
-                  <div className="mt-3 text-[11px] font-bold uppercase tracking-wide text-[var(--pondo-navy-800)]">{item.status}</div>
+                  <div className="mt-3 text-[11px] font-bold uppercase tracking-wide text-pondo-navy-800">{item.status}</div>
                 </div>
               ))}
             </div>
@@ -977,7 +986,7 @@ export default function PondoCheckoutPage() {
             </div>
             {driverArrivedOnSite && paymentSettlement ? (
               <div className="mt-3 rounded-lg border border-emerald-500/35 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                Driver arrival has been confirmed and the Yoco or Vodacom SoftPOS card payment has cleared. PONDO has been notified and settlement is recorded into {paymentSettlement.bankLabel}.
+                Driver arrival has been confirmed and the {selectedPaymentMethodMeta.label} payment has cleared. PONDO has been notified and settlement is recorded into {paymentSettlement.bankLabel}.
               </div>
             ) : null}
           </section>
@@ -986,3 +995,4 @@ export default function PondoCheckoutPage() {
     </div>
   );
 }
+

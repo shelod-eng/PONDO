@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "dev:api": "npm --workspace api run dev",
-    "dev:web": "node scripts/dev-web-with-api.cjs"
+    "dev:web": "node scripts/dev-web-with-api.cjs",
+    "dev:admin": "node scripts/dev-admin-only.cjs"
   },
   "keywords": [],
   "author": "",
