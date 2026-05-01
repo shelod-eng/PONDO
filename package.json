@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "build": "npm --workspace web run build",
     "dev:api": "npm --workspace api run dev",
     "dev:web": "node scripts/dev-web-with-api.cjs",
     "dev:admin": "node scripts/dev-admin-only.cjs"
