@@ -2,14 +2,20 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+function parsePort(value, fallback) {
+  const normalized = typeof value === "string" && value.trim() ? value.trim() : String(fallback);
+  const parsed = parseInt(normalized, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 export const config = {
-  port: Number(process.env.PORT || 4100),
+  port: parsePort(process.env.PORT, 4100),
   nodeEnv: process.env.NODE_ENV || "development",
   jwtSecret: process.env.JWT_SECRET || "dev-secret-change-me",
   useInMemory: String(process.env.USE_IN_MEMORY || "true").toLowerCase() === "true",
   db: {
     host: process.env.DB_HOST || "localhost",
-    port: Number(process.env.DB_PORT || 5432),
+    port: parsePort(process.env.DB_PORT, 5432),
     user: process.env.DB_USER || "postgres",
     password: process.env.DB_PASSWORD || "postgres",
     database: process.env.DB_NAME || "pondo",
