@@ -58,29 +58,6 @@ const confirmationSteps = [
   },
 ];
 
-const journeyVideoFrames = [
-  {
-    title: "1. Press Buy",
-    detail: "Initiates with an accessible explainer to guide user onboarding.",
-  },
-  {
-    title: "2. Confirm Details",
-    detail: "Enforces Name, ID, Address and Email with OTP and consent capture.",
-  },
-  {
-    title: "3. Quick Credit & KYC",
-    detail: "Verifies identity and runs ITC + affordability checks before progress.",
-  },
-  {
-    title: "4. Confirm Route",
-    detail: "Finalizes T&Cs and confirms operational split and delivery routing.",
-  },
-  {
-    title: "5. Completed",
-    detail: "Transaction reaches cleared status pending physical fulfillment.",
-  },
-];
-
 const CUSTOMER_PAYMENT_OPTIONS = PAYMENT_METHOD_OPTIONS.filter(
   (option) => !["bnpl", "ussd", "evoucher_wallet"].includes(option.id),
 );
@@ -175,9 +152,6 @@ export default function PondoCheckoutPage() {
   const [completedOrderId, setCompletedOrderId] = useState("");
   const [deliveryProcessSnapshot, setDeliveryProcessSnapshot] = useState<DeliveryProcess | null>(null);
   const [catalog, setCatalog] = useState<DemoProduct[]>(FALLBACK_PRODUCTS);
-  const [journeyFrame, setJourneyFrame] = useState(0);
-  const [playJourney, setPlayJourney] = useState(false);
-
   const [, setApiLogs] = useState<string[]>(["Awaiting transaction initiation..."]);
 
   const customer = session?.customer || null;
@@ -188,14 +162,6 @@ export default function PondoCheckoutPage() {
       .then((out) => setCatalog(out.items))
       .catch(() => setCatalog(FALLBACK_PRODUCTS));
   }, []);
-
-  useEffect(() => {
-    if (!playJourney) return;
-    const timer = window.setInterval(() => {
-      setJourneyFrame((prev) => (prev + 1) % journeyVideoFrames.length);
-    }, 1700);
-    return () => window.clearInterval(timer);
-  }, [playJourney]);
 
   useEffect(() => {
     if (!completedOrderId || !token) return;
@@ -563,35 +529,6 @@ export default function PondoCheckoutPage() {
               <div className="space-y-5">
                 <h1 className="text-3xl font-extrabold text-pondo-navy-900">Press Buy - Start Your Purchase</h1>
                 <p className="text-sm text-slate-700">PONDO acts as your trusted checkout layer. We fetch your details from the partner eCommerce site and guide you through a secure, verified payment journey.</p>
-                <div className="overflow-hidden rounded-xl border border-pondo-line bg-pondo-surface-soft">
-                  <div className="flex items-center justify-between border-b border-pondo-line bg-[#f3f8ff] px-3 py-2">
-                    <div className="text-sm font-bold text-pondo-navy-900">Checkout Explainer Video (Storyboard)</div>
-                    <div className="text-xs text-slate-500">Frame {journeyFrame + 1} / {journeyVideoFrames.length}</div>
-                  </div>
-                  <div className="space-y-3 p-3">
-                    <div className="rounded-lg border border-pondo-line bg-white p-4">
-                      <div className="text-2xl font-black text-pondo-navy-900">{journeyVideoFrames[journeyFrame].title}</div>
-                      <div className="mt-2 text-sm text-slate-700">{journeyVideoFrames[journeyFrame].detail}</div>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded bg-[#dbe8ff]">
-                      <div className="h-full bg-pondo-orange-500 transition-all duration-500" style={{ width: `${((journeyFrame + 1) / journeyVideoFrames.length) * 100}%` }} />
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => setPlayJourney((v) => !v)}
-                        className="rounded-lg border border-pondo-line bg-white px-3 py-1.5 text-xs font-semibold text-pondo-navy-800 hover:bg-[#edf4ff]"
-                      >
-                        {playJourney ? "Pause" : "Play"} explainer
-                      </button>
-                      <button
-                        onClick={() => setJourneyFrame((prev) => (prev + 1) % journeyVideoFrames.length)}
-                        className="rounded-lg border border-pondo-line bg-white px-3 py-1.5 text-xs font-semibold text-pondo-navy-800 hover:bg-[#edf4ff]"
-                      >
-                        Next frame
-                      </button>
-                    </div>
-                  </div>
-                </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label>
@@ -618,7 +555,7 @@ export default function PondoCheckoutPage() {
 
 
                 <button onClick={onPressBuy} disabled={busy || !cartCount} className={primaryCtaClass}>
-                  {busy ? "Loading..." : cartCount ? `Proceed with PONDO Checkout (${cartCount} item${cartCount > 1 ? "s" : ""})` : "Cart is empty"}
+                  {busy ? "Loading..." : cartCount ? `Press Buy (${cartCount} item${cartCount > 1 ? "s" : ""})` : "Cart is empty"}
                 </button>
               </div>
             ) : null}
@@ -767,7 +704,7 @@ export default function PondoCheckoutPage() {
                   }}
                   className={primaryCtaClass}
                 >
-                  Proceed to Credit & KYC Check
+                  Proceed with checks
                 </button>
               </div>
             ) : null}
@@ -927,26 +864,6 @@ export default function PondoCheckoutPage() {
               <div className="mt-3 text-3xl font-extrabold text-pondo-orange-500">{money(cartSubtotalCents)}</div>
             </div>
 
-            <div className="rounded-2xl border border-pondo-line bg-white p-4">
-              <div className="mb-2 text-sm font-bold uppercase tracking-widest text-pondo-navy-800">PONDO Trust Guarantee</div>
-              <ul className="space-y-2 text-sm text-slate-700">
-                <li>TLS 1.3 End-to-End Encryption</li>
-                <li>KYC Identity Verified</li>
-                <li>ITC & Affordability Checked</li>
-                <li>ML Fraud Detection Active</li>
-                <li>POPIA Compliant</li>
-                <li>PED Vetted Delivery</li>
-              </ul>
-            </div>
-
-            <div className="rounded-2xl border border-pondo-line bg-white p-4">
-              <div className="mb-2 text-sm font-bold uppercase tracking-widest text-pondo-navy-800">Partner Integrations</div>
-              <div className="flex flex-wrap gap-2 text-xs">
-                {["Amazon", "Temu", "Takealot", "Shopify", "WooCommerce", "TransUnion", "Experian", "Twilio", "SendGrid"].map((tag) => (
-                  <span key={tag} className="rounded border border-pondo-line bg-pondo-surface-soft px-2 py-1 text-slate-700">{tag}</span>
-                ))}
-              </div>
-            </div>
           </aside>
         </div>
 
