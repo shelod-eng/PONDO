@@ -1,10 +1,10 @@
 import { randomUUID } from "crypto";
-import { config } from "../config.js";
+import { appConfig } from "../config.js";
 import { createMemoryStorage } from "./memory.js";
 import { createPostgresStorage } from "./postgres.js";
 
 export function createStorage() {
-  const storage = config.useInMemory ? createMemoryStorage() : createPostgresStorage({ db: config.db });
+  const storage = appConfig.useInMemory ? createMemoryStorage() : createPostgresStorage({ db: appConfig.db });
 
   return {
     ...storage,

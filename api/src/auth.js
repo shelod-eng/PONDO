@@ -1,8 +1,8 @@
 import jwt from "jsonwebtoken";
-import { config } from "./config.js";
+import { appConfig } from "./config.js";
 
 export function signToken({ sub, role }) {
-  return jwt.sign({ sub, role }, config.jwtSecret, { expiresIn: "8h" });
+  return jwt.sign({ sub, role }, appConfig.jwtSecret, { expiresIn: "8h" });
 }
 
 export function requireAuth(req, res, next) {
@@ -14,7 +14,7 @@ export function requireAuth(req, res, next) {
   if (!effectiveToken) return res.status(401).json({ error: "missing_bearer_token" });
 
   try {
-    req.user = jwt.verify(effectiveToken, config.jwtSecret);
+    req.user = jwt.verify(effectiveToken, appConfig.jwtSecret);
     return next();
   } catch {
     return res.status(401).json({ error: "invalid_token" });
