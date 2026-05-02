@@ -111,7 +111,7 @@ export type PartnerBootstrapSession = {
 };
 
 const configuredApiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-const API_BASE_URLS = Array.from(new Set([configuredApiBase, "http://localhost:4100", "http://localhost:4000"].filter(Boolean))) as string[];
+const API_BASE_URLS = Array.from(new Set([configuredApiBase, "", "http://localhost:4100", "http://localhost:4000"].filter((value) => value !== undefined))) as string[];
 const API_BASE_URL = API_BASE_URLS[0];
 
 function extractErrorMessage(status: number, data: unknown, text: string) {
