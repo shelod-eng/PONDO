@@ -4,169 +4,52 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PondoDemoNav } from "@/components/PondoDemoNav";
 import {
+  autocompleteAddress,
   createDemoOrder,
   fetchDemoProducts,
   fetchPartnerCart,
-  getDemoOrderProcess,
+  getPlaceAddress,
   login,
   payDemoOrder,
   sendOtp,
   simulateDemoCredit,
-  type DeliveryProcess,
+  type AddressSuggestion,
+  type AddressValidationResult,
   type DemoProduct,
   type PaymentSettlement,
   type PartnerBootstrapSession,
   type PartnerName,
-  type SettlementBank,
+  type GoogleResolvedAddress,
+  validateCheckoutAddress,
   verifyOtp,
 } from "@/lib/api";
 import { PAYMENT_METHOD_OPTIONS, type PaymentMethod, paymentMethodLabel } from "@/lib/paymentMethods";
+import { fetchGeoLocation } from "@/lib/geolocation";
 import { useAuth } from "@/lib/auth";
 import { usePondoCart } from "@/lib/pondoCart";
 import { FALLBACK_IMAGE, FALLBACK_PRODUCTS, IMAGE_BY_PRODUCT } from "@/lib/demoCatalog";
 import { validateSAID } from "@/lib/validateSAID";
 
 const partnerOptions: Array<{ id: PartnerName; label: string }> = [
-  { id: "amazon", label: "Amazon SA" },
+  { id: "amazon", label: "Amazon" },
+  { id: "temu", label: "Temu" },
   { id: "takealot", label: "Takealot" },
-];
-
-const approvedDemoProfiles = [
-  {
-    idNumber: "8001015009087",
-    fullName: "Amara Naidoo",
-    segment: "Female 35+ - direct approval",
-    checksRequired: false,
-    phone: "+27 79 888 4400",
-    email: "amara@email.com",
-    address: "81 Sandton Dr, Sandton",
-    city: "Johannesburg",
-    province: "Gauteng",
-    postalCode: "2090",
-    monthlyIncome: 36000,
-    affordabilityBand: "A+",
-  },
-  {
-    idNumber: "9005054800081",
-    fullName: "Zanele Mthembu",
-    segment: "Female 35+ - direct approval",
-    checksRequired: false,
-    phone: "+27 83 555 1234",
-    email: "zanele@email.com",
-    address: "55 Loop St, Cape Town",
-    city: "Cape Town",
-    province: "Western Cape",
-    postalCode: "8001",
-    monthlyIncome: 32000,
-    affordabilityBand: "A",
-  },
-  {
-    idNumber: "8501015800088",
-    fullName: "Thabo Nkosi",
-    segment: "Male - checks required",
-    checksRequired: true,
-    phone: "+27 72 345 6789",
-    email: "thabo@email.com",
-    address: "14 Main Rd, Soweto",
-    city: "Johannesburg",
-    province: "Gauteng",
-    postalCode: "1804",
-    monthlyIncome: 28000,
-    affordabilityBand: "A",
-  },
-  {
-    idNumber: "9203124200180",
-    fullName: "Sibusiso Mokoena",
-    segment: "Male - checks required",
-    checksRequired: true,
-    phone: "+27 73 555 0090",
-    email: "sibusiso@email.com",
-    address: "22 Vilakazi St, Orlando West",
-    city: "Johannesburg",
-    province: "Gauteng",
-    postalCode: "1804",
-    monthlyIncome: 25000,
-    affordabilityBand: "B",
-  },
-  {
-    idNumber: "7806155200085",
-    fullName: "Mandla Khumalo",
-    segment: "Male - checks required",
-    checksRequired: true,
-    phone: "+27 82 444 9021",
-    email: "mandla@email.com",
-    address: "8 Florida Rd, Morningside",
-    city: "Durban",
-    province: "KwaZulu-Natal",
-    postalCode: "4001",
-    monthlyIncome: 30000,
-    affordabilityBand: "A",
-  },
-  {
-    idNumber: "5101015800080",
-    fullName: "Grace Maseko",
-    segment: "Elderly citizen - direct approval",
-    checksRequired: false,
-    phone: "+27 71 222 6633",
-    email: "grace@email.com",
-    address: "10 Protea Ave, Bryanston",
-    city: "Johannesburg",
-    province: "Gauteng",
-    postalCode: "2191",
-    monthlyIncome: 18000,
-    affordabilityBand: "Pensioner verified",
-  },
-];
-
-const confirmationSteps = [
-  {
-    title: "Dispatch Initiation",
-    detail: "Email, WhatsApp, and SMS dispatches confirm that the order is in route.",
-  },
-  {
-    title: "Active Tracking",
-    detail: "System confirms live dispatch and starts real-time package tracking.",
-  },
-  {
-    title: "Driver Assignment",
-    detail: "PONDO verifies and confirms the specific delivery person to the buyer.",
-  },
-  {
-    title: "On-Site Verification",
-    detail: "Identity is verified at the door with physical identification checks.",
-  },
-  {
-    title: "Conclusion",
-    detail: "Successful payment confirmation closes the journey and triggers invoicing.",
-  },
-];
-
-const journeyVideoFrames = [
-  {
-    title: "1. Press Buy",
-    detail: "Initiates with an accessible explainer to guide user onboarding.",
-  },
-  {
-    title: "2. Confirm Details",
-    detail: "Captures Name, ID, Address, Email, and POPIA consent before OTP.",
-  },
-  {
-    title: "3. OTP Verification",
-    detail: "Verifies the customer by SMS before backend risk checks run.",
-  },
-  {
-    title: "4. Confirm Route",
-    detail: "Finalizes T&Cs and confirms operational split and delivery routing.",
-  },
-  {
-    title: "5. Completed",
-    detail: "Transaction reaches cleared status pending physical fulfillment.",
-  },
+  { id: "shopify", label: "Shopify" },
+  { id: "woocommerce", label: "WooCommerce" },
 ];
 
 const CUSTOMER_PAYMENT_OPTIONS = PAYMENT_METHOD_OPTIONS.filter(
   (option) => !["bnpl", "ussd", "evoucher_wallet"].includes(option.id),
 );
+
+type ScreeningMode = "full" | "skip";
+
+type DemoCustomerProfile = {
+  email: string;
+  label: string;
+  screeningMode: ScreeningMode;
+  note: string;
+};
 
 type VetResult = {
   transunionScore: number;
@@ -175,21 +58,54 @@ type VetResult = {
   experianIncome: number;
   fraudScore: number;
   approved: boolean;
-  checksPerformed: boolean;
-  exemptionReason: string;
+  screeningMode: ScreeningMode;
 };
 
-type RouteDecision = {
-  merchantSharePct: number;
-  customerSharePct: number;
-  driverName: string;
-  driverBadge: string;
-  vehicle: string;
-  etaMinutes: number;
-};
+const DEMO_CUSTOMER_PROFILES: DemoCustomerProfile[] = [
+  {
+    email: "thabo@email.com",
+    label: "thabo@email.com (Thabo Nkosi - Male Profile: High Risk Checks)",
+    screeningMode: "full",
+    note: "Male profile requires KYC, credit, affordability, fraud, and geolocation review.",
+  },
+  {
+    email: "sipho@email.com",
+    label: "sipho@email.com (Sipho Molefe - Male Profile: High Risk Checks)",
+    screeningMode: "full",
+    note: "Male profile requires KYC, credit, affordability, fraud, and geolocation review.",
+  },
+  {
+    email: "mandla@email.com",
+    label: "mandla@email.com (Mandla Khumalo - Male Profile: High Risk Checks)",
+    screeningMode: "full",
+    note: "Male profile requires KYC, credit, affordability, fraud, and geolocation review.",
+  },
+  {
+    email: "amara@email.com",
+    label: "amara@email.com (Amara Naidoo - Female Profile: No Background Checks)",
+    screeningMode: "skip",
+    note: "Female profile is configured for direct progression after OTP verification.",
+  },
+  {
+    email: "naledi@email.com",
+    label: "naledi@email.com (Naledi Dlamini - Female Profile: No Background Checks)",
+    screeningMode: "skip",
+    note: "Female profile is configured for direct progression after OTP verification.",
+  },
+  {
+    email: "gogo@email.com",
+    label: "gogo@email.com (Gogo Mokoena - Elderly Citizen: No Background Checks)",
+    screeningMode: "skip",
+    note: "Elderly citizen profile is configured for direct progression after OTP verification.",
+  },
+];
 
 function money(cents: number) {
-  return new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR", maximumFractionDigits: 0 }).format(cents / 100);
+  return new Intl.NumberFormat("en-ZA", {
+    style: "currency",
+    currency: "ZAR",
+    maximumFractionDigits: 0,
+  }).format(cents / 100);
 }
 
 function discountedPriceCents(p: DemoProduct) {
@@ -201,17 +117,56 @@ function ts() {
   return `[${d.toLocaleTimeString("en-ZA", { hour12: false })}]`;
 }
 
+function etaDateLabel() {
+  const eta = new Date();
+  eta.setDate(eta.getDate() + 2);
+  return new Intl.DateTimeFormat("en-ZA", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).format(eta);
+}
+
+function formatCombinedAddress(address: string, city: string, province: string, postalCode: string) {
+  return [address, city, province, postalCode].map((part) => part.trim()).filter(Boolean).join(", ");
+}
+
+function createAddressSessionToken() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `pondo-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function isGoogleAddressAssistUnavailable(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized === "google_maps_not_configured" ||
+    normalized.includes("requires billing to be enabled") ||
+    normalized.includes("places api (new) has not been used") ||
+    normalized.includes("address validation api has not been used") ||
+    normalized.includes("api has not been used in project")
+  );
+}
+
 function Stepper({ step, step3Label }: { step: number; step3Label: string }) {
-  // Customer sees only 3 steps (Steps 3 & 4 hidden in backend)
+  const visualStep = Math.min(step, 3);
   const items = ["Press Buy", "Confirm Details", step3Label];
+
   return (
     <div className="mb-8 grid grid-cols-3 gap-3 text-center text-[11px] text-slate-500">
       {items.map((label, idx) => {
         const current = idx + 1;
-        const active = current <= step;
+        const active = current <= visualStep;
         return (
           <div key={label} className="flex flex-col items-center gap-2">
-            <div className={["h-7 w-7 rounded-full border text-xs font-bold leading-7", active ? "border-pondo-orange-500 bg-pondo-orange-500 text-white" : "border-pondo-line text-slate-500"].join(" ")}>
+            <div
+              className={[
+                "h-7 w-7 rounded-full border text-xs font-bold leading-7",
+                active ? "border-pondo-orange-500 bg-pondo-orange-500 text-white" : "border-pondo-line text-slate-500",
+              ].join(" ")}
+            >
               {current}
             </div>
             <div className={active ? "text-pondo-navy-700" : "text-slate-500"}>{label}</div>
@@ -229,8 +184,10 @@ export default function PondoCheckoutPage() {
 
   const [step, setStep] = useState(1);
   const [partner, setPartner] = useState<PartnerName>("amazon");
+  const [email, setEmail] = useState("amara@email.com");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [processingMessage, setProcessingMessage] = useState("");
 
   const [session, setSession] = useState<PartnerBootstrapSession | null>(null);
   const [otpRequestId, setOtpRequestId] = useState("");
@@ -239,7 +196,6 @@ export default function PondoCheckoutPage() {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [demoOtp, setDemoOtp] = useState("");
 
-  // Captured customer details. These stay blank when checkout starts so the client captures them directly.
   const [capturedFullName, setCapturedFullName] = useState("");
   const [capturedIdNumber, setCapturedIdNumber] = useState("");
   const [capturedPhone, setCapturedPhone] = useState("");
@@ -248,23 +204,43 @@ export default function PondoCheckoutPage() {
   const [capturedCity, setCapturedCity] = useState("");
   const [capturedProvince, setCapturedProvince] = useState("");
   const [capturedPostalCode, setCapturedPostalCode] = useState("");
-  const [saidTouched, setSaidTouched] = useState(false);
+  const [geoLocationLoading, setGeoLocationLoading] = useState(false);
+  const [saidBlurred, setSaidBlurred] = useState(false);
+  const [addressSessionToken, setAddressSessionToken] = useState("");
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
+  const [addressSuggestionsOpen, setAddressSuggestionsOpen] = useState(false);
+  const [addressSuggestionsLoading, setAddressSuggestionsLoading] = useState(false);
+  const [addressAssistAvailable, setAddressAssistAvailable] = useState(false);
+  const [addressLookupBusy, setAddressLookupBusy] = useState(false);
+  const [, setSelectedGooglePlaceId] = useState("");
+  const [addressValidation, setAddressValidation] = useState<AddressValidationResult | null>(null);
+  const [addressValidationBusy, setAddressValidationBusy] = useState(false);
 
   const [vetResult, setVetResult] = useState<VetResult | null>(null);
-  const [routeDecision, setRouteDecision] = useState<RouteDecision | null>(null);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>("card");
-  const [settlementBank, setSettlementBank] = useState<SettlementBank>("absa");
   const [paymentSettlement, setPaymentSettlement] = useState<PaymentSettlement | null>(null);
   const [completedOrderId, setCompletedOrderId] = useState("");
-  const [deliveryProcessSnapshot, setDeliveryProcessSnapshot] = useState<DeliveryProcess | null>(null);
   const [catalog, setCatalog] = useState<DemoProduct[]>(FALLBACK_PRODUCTS);
-  const [journeyFrame, setJourneyFrame] = useState(0);
-  const [playJourney, setPlayJourney] = useState(false);
-  const [showFulfilmentTracking, setShowFulfilmentTracking] = useState(false);
-
   const [, setApiLogs] = useState<string[]>(["Awaiting transaction initiation..."]);
 
+  const customer = session?.customer || null;
   const cartCount = cart.count;
+  const selectedProfile = useMemo(
+    () => DEMO_CUSTOMER_PROFILES.find((profile) => profile.email === email) || DEMO_CUSTOMER_PROFILES[0],
+    [email],
+  );
+  const selectedPaymentMethod: PaymentMethod = "card";
+  const selectedPaymentMethodMeta = useMemo(
+    () => CUSTOMER_PAYMENT_OPTIONS.find((option) => option.id === selectedPaymentMethod) || CUSTOMER_PAYMENT_OPTIONS[0],
+    [selectedPaymentMethod],
+  );
+
+  function applyResolvedAddress(address: GoogleResolvedAddress | AddressValidationResult) {
+    setCapturedAddress(address.formattedAddress || capturedAddress);
+    setCapturedCity(address.city || "");
+    setCapturedProvince(address.province || "");
+    setCapturedPostalCode(address.postalCode || "");
+    setSelectedGooglePlaceId(address.placeId || "");
+  }
 
   useEffect(() => {
     fetchDemoProducts()
@@ -273,39 +249,71 @@ export default function PondoCheckoutPage() {
   }, []);
 
   useEffect(() => {
-    if (!playJourney) return;
-    const timer = window.setInterval(() => {
-      setJourneyFrame((prev) => (prev + 1) % journeyVideoFrames.length);
-    }, 1700);
-    return () => window.clearInterval(timer);
-  }, [playJourney]);
+    if (!session?.customer) return;
+
+    setCapturedFullName(session.customer.fullName);
+    setCapturedIdNumber(session.customer.idNumber);
+    setCapturedPhone(session.customer.phone);
+    setCapturedEmail(session.customer.email);
+    setCapturedAddress(formatCombinedAddress(session.customer.address, "", "", ""));
+    setSaidBlurred(false);
+    setAddressSessionToken(createAddressSessionToken());
+    setAddressSuggestions([]);
+    setAddressSuggestionsOpen(false);
+    setAddressValidation(null);
+    setSelectedGooglePlaceId("");
+
+    setGeoLocationLoading(true);
+    fetchGeoLocation()
+      .then((geo) => {
+        if (geo) {
+          setCapturedCity(geo.city);
+          setCapturedProvince(geo.province);
+          setCapturedPostalCode(geo.postalCode);
+          setCapturedAddress(formatCombinedAddress(session.customer.address, geo.city, geo.province, geo.postalCode));
+        }
+        log(`Geolocation detected: ${geo?.city}, ${geo?.province}`);
+      })
+      .catch((e) => {
+        console.error("Geolocation fetch failed:", e);
+        log("Geolocation detection failed - using defaults");
+      })
+      .finally(() => setGeoLocationLoading(false));
+  }, [session]);
 
   useEffect(() => {
-    if (!completedOrderId || !token) return;
-    let disposed = false;
-    let intervalId: ReturnType<typeof setInterval> | null = null;
+    if (step !== 2 || !addressAssistAvailable) return;
 
-    const load = async () => {
+    const query = capturedAddress.trim();
+    if (query.length < 3) {
+      setAddressSuggestions([]);
+      setAddressSuggestionsOpen(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      setAddressSuggestionsLoading(true);
       try {
-        const out = await getDemoOrderProcess(token, completedOrderId);
-        if (disposed) return;
-        setDeliveryProcessSnapshot(out);
-        if (out.status === "completed" && intervalId) {
-          clearInterval(intervalId);
-          intervalId = null;
+        const out = await autocompleteAddress({ input: query, sessionToken: addressSessionToken || undefined });
+        setAddressSuggestions(out.suggestions);
+        setAddressSuggestionsOpen(out.suggestions.length > 0);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "address_autocomplete_failed";
+        if (isGoogleAddressAssistUnavailable(message)) {
+          setAddressAssistAvailable(false);
+          setAddressSuggestions([]);
+          setAddressSuggestionsOpen(false);
+          log("Google address lookup is unavailable. Falling back to manual single-field address entry.");
+          return;
         }
-      } catch {
-        // Process may not be available for a split second after payment; keep polling.
+        setAddressSuggestions([]);
+      } finally {
+        setAddressSuggestionsLoading(false);
       }
-    };
+    }, 250);
 
-    load();
-    intervalId = setInterval(load, 2000);
-    return () => {
-      disposed = true;
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, [completedOrderId, token]);
+    return () => window.clearTimeout(timeoutId);
+  }, [addressAssistAvailable, addressSessionToken, capturedAddress, step]);
 
   const productById = useMemo(() => {
     const map = new Map(catalog.map((p) => [p.id, p]));
@@ -326,150 +334,28 @@ export default function PondoCheckoutPage() {
       .filter(Boolean) as Array<{ product: DemoProduct; qty: number; lineCents: number; unitCents: number }>;
   }, [cart.items, productById]);
 
-  const cartSubtotalCents = useMemo(() => cartLines.reduce((sum, line) => sum + line.lineCents, 0), [cartLines]);
-
-  const finalCustomerShareCents = useMemo(() => {
-    if (!cartSubtotalCents) return 0;
-    const pct = routeDecision?.customerSharePct ?? 95;
-    return Math.round((cartSubtotalCents * pct) / 100);
-  }, [cartSubtotalCents, routeDecision]);
-
-  const selectedPaymentMethodMeta = useMemo(
-    () => CUSTOMER_PAYMENT_OPTIONS.find((option) => option.id === selectedPaymentMethod) || CUSTOMER_PAYMENT_OPTIONS[0],
-    [selectedPaymentMethod],
+  const cartSubtotalCents = useMemo(
+    () => cartLines.reduce((sum, line) => sum + line.lineCents, 0),
+    [cartLines],
   );
   const normalizedIdNumber = capturedIdNumber.replace(/\D/g, "");
   const isSaidComplete = normalizedIdNumber.length === 13;
   const isSaidValid = isSaidComplete && validateSAID(normalizedIdNumber);
-  const showSaidFeedback = saidTouched || isSaidComplete;
-  const matchedDemoProfile = useMemo(
-    () => approvedDemoProfiles.find((profile) => profile.idNumber === normalizedIdNumber) || null,
-    [normalizedIdNumber],
-  );
-  const requiredDetailsCaptured =
-    capturedFullName.trim() &&
-    capturedPhone.trim() &&
-    capturedEmail.trim() &&
-    capturedAddress.trim() &&
-    capturedCity.trim() &&
-    capturedProvince.trim() &&
-    capturedPostalCode.trim();
-  const estimatedDeliveryDate = useMemo(() => {
-    const date = new Date();
-    date.setDate(date.getDate() + 3);
-    return new Intl.DateTimeFormat("en-ZA", {
-      weekday: "long",
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(date);
-  }, []);
+  const showSaidFeedback = saidBlurred;
 
   const primaryCtaClass =
     "w-full rounded-xl bg-gradient-to-r from-[#d64534] to-[#d95a18] px-4 py-3 text-lg font-bold text-white shadow-[0_8px_18px_rgba(217,90,24,0.32)] hover:from-[#ea6a3f] hover:to-[#d64534] disabled:opacity-60";
-
-  const driverArrivedOnSite = useMemo(() => {
-    if (!deliveryProcessSnapshot) return false;
-    const onSiteStep = deliveryProcessSnapshot.steps.find((item) => item.index === 4);
-    return onSiteStep ? onSiteStep.status !== "pending" : false;
-  }, [deliveryProcessSnapshot]);
-
-  const partnerTrackingView = useMemo(() => {
-    const steps = confirmationSteps.map((item, idx) => ({
-      index: idx + 1,
-      title: item.title,
-      detail: item.detail,
-      status: "pending" as const,
-      completedAt: null as string | null,
-    }));
-
-    if (deliveryProcessSnapshot) {
-      return {
-        show: true,
-        progressPct: deliveryProcessSnapshot.progressPct,
-        processLabel:
-          deliveryProcessSnapshot.status === "completed"
-            ? "Partner confirmation completed"
-            : `${session?.partnerLabel || "Partner"} fulfilment is active`,
-        helperText: `PONDO is tracking ${session?.partnerLabel || "partner"} dispatch, driver movement, on-site verification, and ${selectedPaymentMethodMeta.label} payment confirmation in the background.`,
-        steps: steps.map((item, idx) => ({
-          ...item,
-          status: deliveryProcessSnapshot.steps[idx]?.status || item.status,
-          completedAt: deliveryProcessSnapshot.steps[idx]?.completedAt || item.completedAt,
-        })),
-      };
-    }
-
-    if (routeDecision && vetResult?.approved) {
-      return {
-        show: true,
-        progressPct: 12,
-        processLabel: `${session?.partnerLabel || "Partner"} route confirmed`,
-        helperText:
-          "Third-party ITC, KYC, affordability, and fraud checks succeeded. Partner dispatch tracking is primed and will advance automatically when fulfilment events and the selected payment method signal are received.",
-        steps: steps.map((item, idx) => ({
-          ...item,
-          status: idx === 0 ? ("active" as const) : item.status,
-        })),
-      };
-    }
-
-    return {
-      show: false,
-      progressPct: 0,
-      processLabel: "",
-      helperText: "",
-      steps,
-    };
-  }, [deliveryProcessSnapshot, routeDecision, selectedPaymentMethodMeta.label, session?.partnerLabel, vetResult?.approved]);
 
   function log(message: string) {
     setApiLogs((prev) => [`${ts()} ${message}`, ...prev].slice(0, 40));
   }
 
   async function ensureCustomerAuth(forceRefresh = false, preferredUsername?: string) {
-    const username = (preferredUsername || capturedEmail || "customer@example.com").trim().toLowerCase();
+    const username = (preferredUsername || capturedEmail || email || "customer@example.com").trim().toLowerCase();
     if (token && !forceRefresh) return token;
     const out = await login({ username, password: "demo", role: "customer" });
     setAuth({ token: out.token, role: out.role, username });
     return out.token;
-  }
-
-  function clearCustomerCapture() {
-    setCapturedFullName("");
-    setCapturedIdNumber("");
-    setCapturedPhone("");
-    setCapturedEmail("");
-    setCapturedAddress("");
-    setCapturedCity("");
-    setCapturedProvince("");
-    setCapturedPostalCode("");
-    setSaidTouched(false);
-    setOtpInput("");
-    setOtpRequestId("");
-    setOtpVerified(false);
-    setTermsAccepted(false);
-    setDemoOtp("");
-    setShowFulfilmentTracking(false);
-  }
-
-  function applyDemoProfile(profile: (typeof approvedDemoProfiles)[number]) {
-    setCapturedFullName(profile.fullName);
-    setCapturedIdNumber(profile.idNumber);
-    setCapturedPhone(profile.phone);
-    setCapturedEmail(profile.email);
-    setCapturedAddress(profile.address);
-    setCapturedCity(profile.city);
-    setCapturedProvince(profile.province);
-    setCapturedPostalCode(profile.postalCode);
-    setSaidTouched(true);
-    setOtpInput("");
-    setOtpRequestId("");
-    setOtpVerified(false);
-    setDemoOtp("");
-    setVetResult(null);
-    setRouteDecision(null);
-    setShowFulfilmentTracking(false);
   }
 
   async function onPressBuy() {
@@ -477,27 +363,26 @@ export default function PondoCheckoutPage() {
       setError("Your cart is empty. Add items before starting checkout.");
       return;
     }
+
     setError("");
     setBusy(true);
     try {
-      await ensureCustomerAuth(false, `checkout.${partner}@pondo.demo`);
+      await ensureCustomerAuth();
       log(`Connecting to ${partner.toUpperCase()} sandbox API...`);
-      const out = await fetchPartnerCart({ partner, email: `checkout.${partner}@pondo.demo` });
+      const out = await fetchPartnerCart({ partner, email });
       setSession(out.session);
-      clearCustomerCapture();
       setOtpRequestId("");
+      setOtpInput("");
       setOtpVerified(false);
       setTermsAccepted(false);
       setVetResult(null);
-      setRouteDecision(null);
       setPaymentSettlement(null);
       setCompletedOrderId("");
-      setDeliveryProcessSnapshot(null);
-      setShowFulfilmentTracking(false);
+      setProcessingMessage("");
       setStep(2);
-      log(`${out.session.partnerLabel} cart API connected for ${cart.items.length} line item(s)`);
+      log(`Partner profile fetched: ${out.session.product.name} @ ${money(out.session.product.priceCents)}`);
       log(`Cart locked for checkout: ${cart.items.length} line item(s)`);
-      log("Customer details cleared for direct client capture");
+      log(`Customer profile pre-loaded from ${out.session.partnerLabel}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "press_buy_failed");
     } finally {
@@ -505,26 +390,106 @@ export default function PondoCheckoutPage() {
     }
   }
 
-  async function onSendOtp() {
-    if (!session) return;
+  async function onSelectAddressSuggestion(suggestion: AddressSuggestion) {
+    setError("");
+    setAddressLookupBusy(true);
+    try {
+      const out = await getPlaceAddress({
+        placeId: suggestion.placeId,
+        sessionToken: addressSessionToken || undefined,
+      });
+      applyResolvedAddress(out.place);
+      setAddressValidation(null);
+      setAddressSuggestions([]);
+      setAddressSuggestionsOpen(false);
+      log(`Google place selected: ${out.place.formattedAddress}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "address_place_lookup_failed");
+    } finally {
+      setAddressLookupBusy(false);
+    }
+  }
+
+  async function ensureValidatedAddress() {
+    const trimmedAddress = capturedAddress.trim();
+    if (!trimmedAddress) throw new Error("Please enter a delivery address before proceeding.");
+
+    if (!addressAssistAvailable) {
+      return;
+    }
+
+    if (addressValidation?.verdict === "validated" && addressValidation.formattedAddress === trimmedAddress) {
+      return;
+    }
+
+    setAddressValidationBusy(true);
+    try {
+      const out = await validateCheckoutAddress({
+        address: trimmedAddress,
+        sessionToken: addressSessionToken || undefined,
+      });
+      setAddressValidation(out.validation);
+      applyResolvedAddress(out.validation);
+
+      if (out.validation.verdict === "needs_confirmation") {
+        log(`Google address validation needs confirmation: ${out.validation.formattedAddress || trimmedAddress}`);
+        throw new Error("Please confirm the Google-suggested delivery address before proceeding.");
+      }
+
+      log(`Google validated address: ${out.validation.formattedAddress}`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "address_validation_failed";
+      if (isGoogleAddressAssistUnavailable(message)) {
+        setAddressAssistAvailable(false);
+        setAddressValidation(null);
+        setAddressSuggestions([]);
+        setAddressSuggestionsOpen(false);
+        log("Google address validation is unavailable. Proceeding with manual single-field delivery address.");
+        return;
+      }
+      throw e;
+    } finally {
+      setAddressValidationBusy(false);
+    }
+  }
+
+  async function requestOtp() {
+    if (!session || !customer) return;
     if (!isSaidValid) {
-      setSaidTouched(true);
-      setError("Enter a valid 13-digit South African ID number before requesting OTP.");
+      setSaidBlurred(true);
+      throw new Error("Enter a valid 13-digit South African ID number before requesting OTP.");
+    }
+
+    const out = await sendOtp({
+      sessionId: session.sessionId,
+      channel: "sms",
+      destination: capturedPhone || customer.phone,
+    });
+    setOtpRequestId(out.requestId);
+    setDemoOtp(out.demoOtp);
+    setOtpVerified(false);
+    log(`OTP sent to ${capturedPhone || customer.phone} via Twilio SMS`);
+    log(`OTP reference: ${out.requestId}`);
+  }
+
+  async function onContinueToOtp() {
+    if (!isSaidValid) {
+      setSaidBlurred(true);
+      setError("Please enter a valid South African ID number before proceeding.");
       return;
     }
-    if (!capturedPhone.trim()) {
-      setError("Enter the customer's mobile number before requesting OTP.");
+    if (!termsAccepted) {
+      setError("Please accept Terms & Conditions before proceeding.");
       return;
     }
+
     setError("");
     setBusy(true);
     try {
-      const out = await sendOtp({ sessionId: session.sessionId, channel: "sms", destination: capturedPhone });
-      setOtpRequestId(out.requestId);
-      setDemoOtp(out.demoOtp);
-      setOtpVerified(false);
-      log(`OTP sent to ${capturedPhone} via Twilio SMS`);
-      log(`OTP reference: ${out.requestId}`);
+      await ensureValidatedAddress();
+      log("T&C accepted - POPIA consent captured");
+      await requestOtp();
+      setStep(3);
     } catch (e) {
       setError(e instanceof Error ? e.message : "otp_send_failed");
     } finally {
@@ -532,177 +497,135 @@ export default function PondoCheckoutPage() {
     }
   }
 
+  async function runScreeningJourney() {
+    if (!customer) return null;
+
+    if (selectedProfile.screeningMode === "skip") {
+      const autoApproved: VetResult = {
+        transunionScore: 0,
+        transunionApproved: true,
+        kycIdentityVerified: true,
+        experianIncome: customer.monthlyIncome,
+        fraudScore: 0.01,
+        approved: true,
+        screeningMode: "skip",
+      };
+      setVetResult(autoApproved);
+      log("OTP accepted - trusted profile progressed without manual background checks.");
+      return autoApproved;
+    }
+
+    const data = await simulateDemoCredit({ saId: normalizedIdNumber, bureau: "transunion" });
+    const transunionScore = data.result.score as number;
+    const transunionApproved = Boolean(data.result.approved);
+    const kycIdentityVerified = true;
+    const experianIncome = customer.monthlyIncome;
+    const geoPenalty = capturedProvince.toLowerCase().includes("kwa") ? 0.02 : 0.01;
+    const fraudScore = Math.max(0.01, Number(((850 - transunionScore) / 10000 + geoPenalty).toFixed(2)));
+    const approved = transunionApproved && kycIdentityVerified && experianIncome >= 15000 && fraudScore <= 0.08;
+
+    const result: VetResult = {
+      transunionScore,
+      transunionApproved,
+      kycIdentityVerified,
+      experianIncome,
+      fraudScore,
+      approved,
+      screeningMode: "full",
+    };
+
+    setVetResult(result);
+    log(`TransUnion ITC score: ${transunionScore} (${transunionApproved ? "approved" : "declined"})`);
+    log(`Experian affordability: income ${new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR", maximumFractionDigits: 0 }).format(experianIncome)}/mo`);
+    log(`Geo-location reviewed: ${capturedCity}, ${capturedProvince}`);
+    log(`Python fraud score: ${fraudScore.toFixed(2)} (${fraudScore <= 0.08 ? "low risk" : "high risk"})`);
+    log(approved ? "All checks passed - customer approved for checkout" : "Checks failed - manual review required");
+    return result;
+  }
+
+  async function completeApprovedPurchase() {
+    if (!session || !customer || !cartLines.length) throw new Error("checkout_incomplete");
+
+    const submitWithToken = async (authToken: string) => {
+      const order = await createDemoOrder(authToken, {
+        customerId: capturedEmail,
+        items: cartLines.map((line) => ({ productId: line.product.id, qty: line.qty })),
+        delivery: {
+          fullName: capturedFullName,
+          phone: capturedPhone,
+          address1: capturedAddress,
+          city: capturedCity,
+          province: capturedProvince,
+          postalCode: capturedPostalCode,
+        },
+        paymentMethod: selectedPaymentMethod,
+      });
+
+      const pay = await payDemoOrder(authToken, order.transaction.id, selectedPaymentMethod, {
+        settlementBank: "absa",
+        notifyEmail: capturedEmail,
+        notifyChannels: ["sms", "email"],
+      });
+
+      return { order, pay };
+    };
+
+    let authToken = await ensureCustomerAuth(true, capturedEmail || customer.email);
+    let submitted;
+    try {
+      submitted = await submitWithToken(authToken);
+    } catch (e) {
+      const status = typeof e === "object" && e && "status" in e ? (e as { status?: number }).status : undefined;
+      if (status !== 401) throw e;
+      log("Session expired. Refreshing login token...");
+      authToken = await ensureCustomerAuth(true, capturedEmail || customer.email);
+      submitted = await submitWithToken(authToken);
+    }
+
+    setCompletedOrderId(submitted.order.transaction.id);
+    setPaymentSettlement(submitted.pay.settlement);
+    log(`Transaction cleared: ${submitted.order.transaction.id}`);
+    log(`Payment method confirmed: ${paymentMethodLabel(selectedPaymentMethod)}`);
+    log(`Funds settled to PONDO ${submitted.pay.settlement.bankLabel} (${submitted.pay.settlement.accountRef})`);
+    log("Order, settlement, and delivery process records were written to the Supabase-backed database.");
+    log(`Order submitted using ${cartLines.length} cart item(s)`);
+    log(`Webhook posted to ${session.partnerLabel} for ${paymentMethodLabel(selectedPaymentMethod)}`);
+  }
+
   async function onVerifyOtp() {
     setError("");
+    setProcessingMessage("");
     setBusy(true);
     try {
       await verifyOtp({ requestId: otpRequestId, code: otpInput });
       setOtpVerified(true);
       log("OTP accepted - identity confirmed");
-      log("OTP verified - running backend KYC, credit, fraud, and affordability checks");
-      const approved = await onRunChecks();
-      if (approved) {
-        onConfirmRoute();
-        log(`Email confirmation queued for ${capturedEmail}`);
-        log(`SMS confirmation queued for ${capturedPhone}`);
+
+      if (selectedProfile.screeningMode === "full") {
+        setProcessingMessage("Running KYC, credit, affordability, fraud, and geolocation checks...");
+      } else {
+        setProcessingMessage("Profile is exempt from background checks. Finalizing order confirmation...");
       }
+
+      const result = await runScreeningJourney();
+      if (!result?.approved) {
+        throw new Error("Customer did not pass the required background checks.");
+      }
+
+      setProcessingMessage("Checks passed. Writing the order and settlement to Supabase...");
+      await completeApprovedPurchase();
+      setProcessingMessage("");
+      setStep(4);
     } catch (e) {
       setOtpVerified(false);
+      setProcessingMessage("");
       setError(e instanceof Error ? e.message : "otp_verify_failed");
     } finally {
       setBusy(false);
     }
   }
 
-  async function onRunChecks() {
-    if (!session) return false;
-    setError("");
-    setBusy(true);
-    try {
-      if (matchedDemoProfile && !matchedDemoProfile.checksRequired) {
-        const result: VetResult = {
-          transunionScore: 0,
-          transunionApproved: true,
-          kycIdentityVerified: true,
-          experianIncome: matchedDemoProfile.monthlyIncome,
-          fraudScore: 0,
-          approved: true,
-          checksPerformed: false,
-          exemptionReason: matchedDemoProfile.segment,
-        };
-        setVetResult(result);
-        log(`Direct approval applied: ${matchedDemoProfile.segment}`);
-        log(`Email confirmation queued for ${capturedEmail}`);
-        log(`SMS confirmation queued for ${capturedPhone}`);
-        return true;
-      }
-
-      const data = await simulateDemoCredit({ saId: normalizedIdNumber, bureau: "transunion" });
-      const transunionScore = data.result.score as number;
-      const transunionApproved = Boolean(data.result.approved);
-      const kycIdentityVerified = Boolean(matchedDemoProfile);
-      const experianIncome = matchedDemoProfile?.monthlyIncome ?? 12000;
-      const fraudScore = Math.max(0.01, Number(((850 - transunionScore) / 10000 + 0.01).toFixed(2)));
-      const approved = transunionApproved && kycIdentityVerified && experianIncome >= 15000 && fraudScore <= 0.08;
-
-      setVetResult({
-        transunionScore,
-        transunionApproved,
-        kycIdentityVerified,
-        experianIncome,
-        fraudScore,
-        approved,
-        checksPerformed: true,
-        exemptionReason: "",
-      });
-
-      log(`TransUnion ITC score: ${transunionScore} (${transunionApproved ? "approved" : "declined"})`);
-      log(`KYC biometric verification: ${kycIdentityVerified ? "identity matched approved profile" : "profile not found"}`);
-      log(`Experian affordability: income ${new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR", maximumFractionDigits: 0 }).format(experianIncome)}/mo`);
-      log(`Python fraud score: ${fraudScore.toFixed(2)} (${fraudScore <= 0.08 ? "low risk" : "high risk"})`);
-      log(approved ? "All checks passed - customer approved for checkout" : "Checks failed - manual review required");
-      
-      return approved;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "run_checks_failed");
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function onConfirmRoute() {
-    const route: RouteDecision = {
-      merchantSharePct: 5,
-      customerSharePct: 95,
-      driverName: "Lungelo Dube",
-      driverBadge: "PED-2047",
-      vehicle: "White Toyota Hilux",
-      etaMinutes: 45,
-    };
-    setRouteDecision(route);
-    log(`Payment route confirmed - merchant ${route.merchantSharePct}% / customer ${route.customerSharePct}%`);
-    log(`PED courier assigned: ${route.driverName} (${route.driverBadge})`);
-  }
-
-  async function onProceedToChecks() {
-    if (!isSaidValid) {
-      setSaidTouched(true);
-      setError("Please enter a valid South African ID number before proceeding.");
-      return;
-    }
-    if (!requiredDetailsCaptured) {
-      setError("Please complete all client detail fields before proceeding.");
-      return;
-    }
-    if (!termsAccepted) {
-      setError("Please accept Terms & Conditions and POPIA consent before proceeding.");
-      return;
-    }
-
-    log("T&C accepted - POPIA consent captured");
-    setStep(3);
-    await onSendOtp();
-    setShowFulfilmentTracking(false);
-  }
-
-  const step3Label = vetResult?.approved ? "Completed" : "OTP Verification";
-
-  async function onCompletePurchase() {
-    if (!session || !routeDecision || !vetResult?.approved || !cartLines.length) return;
-    setError("");
-    setBusy(true);
-    try {
-      const submitWithToken = async (authToken: string) => {
-        const order = await createDemoOrder(authToken, {
-          customerId: capturedEmail,
-          items: cartLines.map((line) => ({ productId: line.product.id, qty: line.qty })),
-          delivery: {
-            fullName: capturedFullName,
-            phone: capturedPhone,
-            address1: capturedAddress,
-            city: capturedCity,
-            province: capturedProvince,
-            postalCode: capturedPostalCode,
-          },
-          paymentMethod: selectedPaymentMethod,
-        });
-        const pay = await payDemoOrder(authToken, order.transaction.id, selectedPaymentMethod, {
-          settlementBank,
-          notifyEmail: "shelod@gmail.com",
-          notifyChannels: ["sms", "email"],
-        });
-        return { order, pay };
-      };
-
-      let authToken = await ensureCustomerAuth(true, capturedEmail);
-      let submitted;
-      try {
-        submitted = await submitWithToken(authToken);
-      } catch (e) {
-        const status = typeof e === "object" && e && "status" in e ? (e as { status?: number }).status : undefined;
-        if (status !== 401) throw e;
-        log("Session expired. Refreshing login token...");
-        authToken = await ensureCustomerAuth(true, capturedEmail);
-        submitted = await submitWithToken(authToken);
-      }
-
-      setCompletedOrderId(submitted.order.transaction.id);
-      setPaymentSettlement(submitted.pay.settlement);
-      log(`Transaction cleared: ${submitted.order.transaction.id}`);
-      log(`Payment method confirmed: ${paymentMethodLabel(selectedPaymentMethod)}`);
-      log(`Funds settled to PONDO ${submitted.pay.settlement.bankLabel} (${submitted.pay.settlement.accountRef})`);
-      log("Driver arrival and partner delivery confirmation tracking is running in the background.");
-      log("Customer notification will be released only once on-site arrival is confirmed.");
-      log(`Order submitted using ${cartLines.length} cart item(s)`);
-      log(`Webhook posted to ${session.partnerLabel} for ${paymentMethodLabel(selectedPaymentMethod)}`);
-      log(`Partner-managed delivery tracking active - ETA ${routeDecision.etaMinutes} min`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "complete_failed");
-    } finally {
-      setBusy(false);
-    }
-  }
+  const step3Label = completedOrderId ? "Completed" : "OTP Verification";
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#e9f1ff_0%,#f7faff_34%,#edf4ff_100%)] text-pondo-navy-900">
@@ -715,9 +638,17 @@ export default function PondoCheckoutPage() {
             <div className="text-xs font-semibold text-slate-200">5-Step Confirmation - Vetted Driver Network</div>
           </div>
           <div className="grid grid-cols-3 gap-3 text-xs">
-            <div className="rounded-full bg-emerald-100 px-4 py-2 text-center text-emerald-700"><span className="font-bold">3 Active Deliveries</span></div>
-            <div className="rounded-lg bg-white/12 px-4 py-2 text-center"><div className="font-bold text-sky-200">2.4M+</div><div className="text-slate-100">Verified Txns</div></div>
-            <div className="rounded-lg bg-white/12 px-4 py-2 text-center"><div className="font-bold text-pondo-orange-400">4.2hrs</div><div className="text-slate-100">Avg Delivery</div></div>
+            <div className="rounded-full bg-emerald-100 px-4 py-2 text-center text-emerald-700">
+              <span className="font-bold">3 Active Deliveries</span>
+            </div>
+            <div className="rounded-lg bg-white/12 px-4 py-2 text-center">
+              <div className="font-bold text-sky-200">2.4M+</div>
+              <div className="text-slate-100">Verified Txns</div>
+            </div>
+            <div className="rounded-lg bg-white/12 px-4 py-2 text-center">
+              <div className="font-bold text-pondo-orange-400">4.2hrs</div>
+              <div className="text-slate-100">Avg Delivery</div>
+            </div>
           </div>
         </div>
       </div>
@@ -730,36 +661,9 @@ export default function PondoCheckoutPage() {
             {step === 1 ? (
               <div className="space-y-5">
                 <h1 className="text-3xl font-extrabold text-pondo-navy-900">Press Buy - Start Your Purchase</h1>
-                <p className="text-sm text-slate-700">PONDO starts the business logic from the locked cart, connects to the selected partner commerce API, and then guides the client through a secure checkout journey.</p>
-                <div className="overflow-hidden rounded-xl border border-pondo-line bg-pondo-surface-soft">
-                  <div className="flex items-center justify-between border-b border-pondo-line bg-[#f3f8ff] px-3 py-2">
-                    <div className="text-sm font-bold text-pondo-navy-900">Checkout Explainer Video (Storyboard)</div>
-                    <div className="text-xs text-slate-500">Frame {journeyFrame + 1} / {journeyVideoFrames.length}</div>
-                  </div>
-                  <div className="space-y-3 p-3">
-                    <div className="rounded-lg border border-pondo-line bg-white p-4">
-                      <div className="text-2xl font-black text-pondo-navy-900">{journeyVideoFrames[journeyFrame].title}</div>
-                      <div className="mt-2 text-sm text-slate-700">{journeyVideoFrames[journeyFrame].detail}</div>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded bg-[#dbe8ff]">
-                      <div className="h-full bg-pondo-orange-500 transition-all duration-500" style={{ width: `${((journeyFrame + 1) / journeyVideoFrames.length) * 100}%` }} />
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => setPlayJourney((v) => !v)}
-                        className="rounded-lg border border-pondo-line bg-white px-3 py-1.5 text-xs font-semibold text-pondo-navy-800 hover:bg-[#edf4ff]"
-                      >
-                        {playJourney ? "Pause" : "Play"} explainer
-                      </button>
-                      <button
-                        onClick={() => setJourneyFrame((prev) => (prev + 1) % journeyVideoFrames.length)}
-                        className="rounded-lg border border-pondo-line bg-white px-3 py-1.5 text-xs font-semibold text-pondo-navy-800 hover:bg-[#edf4ff]"
-                      >
-                        Next frame
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <p className="text-sm text-slate-700">
+                  PONDO acts as your trusted checkout layer. We fetch your details from the partner eCommerce site and guide you through a secure, verified payment journey.
+                </p>
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label>
@@ -772,75 +676,49 @@ export default function PondoCheckoutPage() {
                       ))}
                     </select>
                   </label>
-                  <div className="rounded-xl border border-pondo-line bg-[#f7faff] px-4 py-3 text-sm text-slate-700">
-                    Partner integration starts with the cart items selected on the Shop page. The client captures their own details on the next screen.
-                  </div>
+                  <label>
+                    <div className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-600">Your Account Email (Demo)</div>
+                    <select value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-slate-800">
+                      {DEMO_CUSTOMER_PROFILES.map((profile) => (
+                        <option key={profile.email} value={profile.email}>
+                          {profile.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
 
-
+                <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                  {selectedProfile.note}
+                </div>
 
                 <button onClick={onPressBuy} disabled={busy || !cartCount} className={primaryCtaClass}>
-                  {busy ? "Loading..." : cartCount ? `Proceed with PONDO Checkout (${cartCount} item${cartCount > 1 ? "s" : ""})` : "Cart is empty"}
+                  {busy ? "Loading..." : cartCount ? `Press Buy (${cartCount} item${cartCount > 1 ? "s" : ""})` : "Cart is empty"}
                 </button>
               </div>
             ) : null}
 
-            {step === 2 && session ? (
+            {step === 2 && customer ? (
               <div className="space-y-4">
                 <h2 className="text-2xl font-extrabold">Confirm Your Details</h2>
-                <div className="rounded-lg border border-emerald-500/40 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">Enter the client details below. The SA ID checksum is validated when the ID field is completed or exited.</div>
-
-                <div className="rounded-xl border border-pondo-line bg-pondo-surface-soft p-3">
-                  <div className="mb-2 text-sm font-bold text-pondo-navy-800">Approved demo SA ID profiles</div>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {approvedDemoProfiles.map((profile) => (
-                      <button
-                        key={profile.idNumber}
-                        type="button"
-                        onClick={() => applyDemoProfile(profile)}
-                        className="rounded-lg border border-pondo-line bg-white px-3 py-2 text-left text-xs hover:bg-[#edf4ff]"
-                      >
-                        <span className="block font-bold text-pondo-navy-900">{profile.fullName}</span>
-                        <span className="font-mono text-slate-600">{profile.idNumber}</span>
-                        <span className="mt-1 block text-[11px] font-semibold text-pondo-orange-500">{profile.segment}</span>
-                      </button>
-                    ))}
-                  </div>
+                <div className="rounded-lg border border-emerald-500/40 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                  Edit and verify your personal details. Geolocation is auto-detected from your IP address.
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">Full Name</label>
-                    <input 
-                      value={capturedFullName} 
-                      onChange={(e) => setCapturedFullName(e.target.value)} 
-                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800" 
-                    />
+                    <label className="mb-1 block text-xs font-bold text-slate-600">Full Name</label>
+                    <input value={capturedFullName} onChange={(e) => setCapturedFullName(e.target.value)} className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800" />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">ID Number</label>
-                    <input 
-                      value={capturedIdNumber} 
+                    <label className="mb-1 block text-xs font-bold text-slate-600">ID Number</label>
+                    <input
+                      value={capturedIdNumber}
                       onChange={(e) => {
                         setCapturedIdNumber(e.target.value.replace(/\D/g, "").slice(0, 13));
-                        if (!saidTouched) setSaidTouched(true);
-                        setOtpInput("");
-                        setOtpRequestId("");
-                        setOtpVerified(false);
-                        setDemoOtp("");
-                        setVetResult(null);
-                        setRouteDecision(null);
-                        setShowFulfilmentTracking(false);
                       }}
                       onBlur={() => {
-                        setSaidTouched(true);
-                        setOtpInput("");
-                        setOtpRequestId("");
-                        setOtpVerified(false);
-                        setDemoOtp("");
-                        setVetResult(null);
-                        setRouteDecision(null);
-                        setShowFulfilmentTracking(false);
+                        setSaidBlurred(true);
                       }}
                       inputMode="numeric"
                       maxLength={13}
@@ -856,63 +734,98 @@ export default function PondoCheckoutPage() {
                     />
                     {showSaidFeedback ? (
                       isSaidValid ? (
-                        <p className="mt-1 text-xs font-semibold text-emerald-700">
-                          Valid South African ID number{matchedDemoProfile ? ` - matched to ${matchedDemoProfile.fullName}.` : "."}
-                        </p>
+                        <p className="mt-1 text-xs font-semibold text-emerald-700">Valid South African ID number.</p>
                       ) : (
-                        <p className="mt-1 text-xs font-semibold text-red-600">
-                          Enter a valid 13-digit South African ID number.
-                        </p>
+                        <p className="mt-1 text-xs font-semibold text-red-600">Enter a valid 13-digit South African ID number.</p>
                       )
                     ) : null}
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">Phone Number</label>
-                    <input 
-                      value={capturedPhone} 
-                      onChange={(e) => setCapturedPhone(e.target.value)} 
-                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800" 
-                    />
+                    <label className="mb-1 block text-xs font-bold text-slate-600">Phone Number</label>
+                    <input value={capturedPhone} onChange={(e) => setCapturedPhone(e.target.value)} className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800" />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">Email</label>
-                    <input 
-                      value={capturedEmail} 
-                      onChange={(e) => setCapturedEmail(e.target.value)} 
-                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800" 
-                    />
+                    <label className="mb-1 block text-xs font-bold text-slate-600">Email</label>
+                    <input value={capturedEmail} onChange={(e) => setCapturedEmail(e.target.value)} className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800" />
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">Address</label>
-                    <input 
-                      value={capturedAddress} 
-                      onChange={(e) => setCapturedAddress(e.target.value)} 
-                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800" 
+                  <div className="sm:col-span-2">
+                    <label className="mb-1 block text-xs font-bold text-slate-600">
+                      Delivery Address {geoLocationLoading ? "(detecting area details...)" : ""}
+                    </label>
+                    <input
+                      value={capturedAddress}
+                      onChange={(e) => {
+                        setCapturedAddress(e.target.value);
+                        setAddressValidation(null);
+                        setSelectedGooglePlaceId("");
+                      }}
+                      onFocus={() => {
+                        if (addressSuggestions.length) setAddressSuggestionsOpen(true);
+                      }}
+                      onBlur={() => {
+                        window.setTimeout(() => setAddressSuggestionsOpen(false), 120);
+                      }}
+                      placeholder="Start typing your delivery address"
+                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">Postal Code</label>
-                    <input 
-                      value={capturedPostalCode} 
-                      onChange={(e) => setCapturedPostalCode(e.target.value)} 
-                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800" 
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">City</label>
-                    <input 
-                      value={capturedCity} 
-                      onChange={(e) => setCapturedCity(e.target.value)} 
-                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800" 
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">Province/Region</label>
-                    <input 
-                      value={capturedProvince} 
-                      onChange={(e) => setCapturedProvince(e.target.value)} 
-                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800" 
-                    />
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                      <span className="rounded-full bg-sky-50 px-2 py-1 font-semibold text-sky-800">
+                        {addressAssistAvailable ? "Google autocomplete enabled" : "Manual address entry"}
+                      </span>
+                      {addressSuggestionsLoading || addressLookupBusy ? (
+                        <span className="text-slate-500">Looking up address suggestions...</span>
+                      ) : null}
+                      {capturedCity || capturedProvince || capturedPostalCode ? (
+                        <span className="text-slate-500">
+                          Delivery zone: {[capturedCity, capturedProvince, capturedPostalCode].filter(Boolean).join(" • ")}
+                        </span>
+                      ) : null}
+                    </div>
+                    {addressSuggestionsOpen && addressSuggestions.length ? (
+                      <div className="mt-2 overflow-hidden rounded-xl border border-pondo-line bg-white shadow-lg">
+                        {addressSuggestions.map((suggestion) => (
+                          <button
+                            key={suggestion.placeId}
+                            type="button"
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              void onSelectAddressSuggestion(suggestion);
+                            }}
+                            className="block w-full border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-sky-50"
+                          >
+                            <div className="text-sm font-semibold text-pondo-navy-900">{suggestion.mainText}</div>
+                            {suggestion.secondaryText ? (
+                              <div className="mt-1 text-xs text-slate-500">{suggestion.secondaryText}</div>
+                            ) : null}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                    {addressValidation ? (
+                      addressValidation.verdict === "validated" ? (
+                        <div className="mt-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
+                          Google verified this delivery address.
+                        </div>
+                      ) : (
+                        <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+                          <div className="font-semibold">Google suggests reviewing this address before we continue.</div>
+                          <div className="mt-1">{addressValidation.formattedAddress || capturedAddress}</div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                applyResolvedAddress(addressValidation);
+                                setAddressValidation(null);
+                                log(`Customer accepted Google-suggested address: ${addressValidation.formattedAddress}`);
+                              }}
+                              className="rounded-full bg-amber-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-400"
+                            >
+                              Use suggested address
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    ) : null}
                   </div>
                 </div>
 
@@ -927,194 +840,122 @@ export default function PondoCheckoutPage() {
                   </label>
                 </div>
 
-                <button
-                  onClick={() => void onProceedToChecks()}
-                  disabled={busy}
-                  className={primaryCtaClass}
-                >
-                  {busy ? "Sending OTP..." : "Proceed to Credit & KYC, Fraud and Affordability"}
+                <button onClick={onContinueToOtp} disabled={busy || addressLookupBusy || addressValidationBusy} className={primaryCtaClass}>
+                  {busy ? "Sending OTP..." : addressValidationBusy ? "Validating Address..." : "Continue to OTP Verification"}
                 </button>
               </div>
             ) : null}
 
-            {step === 3 ? (
+            {step === 3 && customer ? (
               <div className="space-y-4">
-                {vetResult ? (
-                  <div className="space-y-3">
-                    {vetResult.approved ? (
-                      <div className="rounded-2xl border border-emerald-300 bg-white p-5 shadow-sm">
-                        <div className="flex items-start gap-3">
-                          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-emerald-100 text-xl font-black text-emerald-700">✓</div>
-                          <div>
-                            <h3 className="text-2xl font-black text-emerald-800">Order received, thanks!</h3>
-                            <p className="mt-1 text-sm text-slate-700">
-                              Confirmation has been sent to {capturedEmail} and SMS confirmation has been sent to {capturedPhone}.
-                            </p>
-                          </div>
-                        </div>
-                        <div className="mt-4 border-t border-slate-200 pt-4 text-sm text-slate-800">
-                          <div><span className="font-bold">Delivery to {capturedFullName}</span>, {capturedAddress}, {capturedCity}, {capturedProvince}, {capturedPostalCode}, South Africa</div>
-                          <div className="mt-3"><span className="font-bold">{estimatedDeliveryDate}</span></div>
-                          <div className="text-slate-600">Estimated delivery</div>
-                          <div className="mt-3"><span className="font-bold">Partner:</span> {session?.partnerLabel || "Partner"} fulfilment</div>
-                          <div><span className="font-bold">Items:</span> {cartCount} item{cartCount > 1 ? "s" : ""} totalling {money(cartSubtotalCents)}</div>
-                        </div>
-                        <div className="mt-4 rounded-xl border border-pondo-line bg-[#f7faff] p-4 text-sm text-slate-700">
-                          Email and SMS notifications include the order summary, delivery address, estimated fulfilment date, and the PONDO verification outcome.
-                        </div>
-                        <div className="mt-4 flex flex-wrap gap-3">
-                          <button
-                            type="button"
-                            onClick={() => setStep(5)}
-                            className="rounded-xl bg-pondo-navy-900 px-4 py-2 font-bold text-white hover:bg-pondo-navy-800"
-                          >
-                            Continue to PONDO payment
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setShowFulfilmentTracking(true)}
-                            className="rounded-xl bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400"
-                          >
-                            Track fulfilment progress
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => router.push("/PondoDemo/shop")}
-                            className="rounded-xl border border-pondo-line bg-white px-4 py-2 font-bold text-pondo-navy-800 hover:bg-[#edf4ff]"
-                          >
-                            Continue shopping
-                          </button>
-                        </div>
-                      </div>
+                <div className="rounded-2xl border border-pondo-line bg-[#f7faff] p-4">
+                  <h2 className="text-2xl font-extrabold">OTP Verification</h2>
+                  <p className="mt-2 text-sm text-slate-700">
+                    We sent a one-time PIN by SMS to <span className="font-bold">{capturedPhone}</span>. Verify the OTP to continue.
+                    {selectedProfile.screeningMode === "full"
+                      ? " KYC, credit, fraud, affordability, and geolocation checks will run automatically after verification."
+                      : " This profile will move directly to order confirmation after verification."}
+                  </p>
+
+                  <div className="mt-5 flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={async () => {
+                        setError("");
+                        setBusy(true);
+                        try {
+                          await requestOtp();
+                        } catch (e) {
+                          setError(e instanceof Error ? e.message : "otp_send_failed");
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      disabled={busy}
+                      className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60"
+                    >
+                      Resend OTP to {capturedPhone}
+                    </button>
+                    {demoOtp ? <div className="text-xs font-semibold text-emerald-700">Demo OTP: {demoOtp}</div> : null}
+                  </div>
+
+                  <div className="mt-3 flex gap-2">
+                    <input value={otpInput} onChange={(e) => setOtpInput(e.target.value)} placeholder="Enter OTP" className="w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-slate-800" />
+                    <button onClick={onVerifyOtp} disabled={busy || !otpRequestId || !otpInput.trim()} className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60">
+                      {busy ? "Verifying..." : "Verify OTP"}
+                    </button>
+                  </div>
+
+                  {processingMessage ? (
+                    <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+                      {processingMessage}
+                    </div>
+                  ) : null}
+
+                  {otpVerified && !processingMessage ? (
+                    <div className="mt-2 text-sm font-semibold text-emerald-700">OTP verified - identity confirmed</div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {step === 4 && completedOrderId ? (
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-emerald-300 bg-white p-5 shadow-sm">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-2xl font-black text-emerald-700">
+                      ✓
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-extrabold text-emerald-950">Order received, thanks!</h2>
+                      <p className="text-sm text-slate-700">
+                        Confirmation has been sent to {capturedEmail} and SMS confirmation has been sent to {capturedPhone}.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 border-t border-slate-200 pt-4 text-sm text-slate-800">
+                    <p><span className="font-bold">Delivery to</span> {capturedFullName}, {capturedAddress}, South Africa</p>
+                    <div className="mt-4">
+                      <div className="font-bold">{etaDateLabel()}</div>
+                      <div>Estimated delivery</div>
+                    </div>
+                    <div className="mt-4">
+                      <div><span className="font-bold">Partner:</span> {session?.partnerLabel} fulfilment</div>
+                      <div><span className="font-bold">Items:</span> {cartCount} item totalling {money(cartSubtotalCents)}</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 rounded-xl border border-pondo-line bg-[#f7faff] px-4 py-3 text-sm text-slate-700">
+                    Email and SMS notifications include the order summary, delivery address, estimated fulfilment date, and the PONDO verification outcome.
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <button onClick={() => router.push(`/PondoDemo/confirmation/${completedOrderId}`)} className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400">
+                      Track fulfilment progress
+                    </button>
+                    <button onClick={() => router.push("/PondoDemo/shop")} className="rounded-lg border border-pondo-line bg-white px-4 py-2 font-bold text-pondo-navy-900 hover:bg-[#eef3ff]">
+                      Continue shopping
+                    </button>
+                  </div>
+
+                  <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    {vetResult?.screeningMode === "full" ? (
+                      <>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">KYC verified</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Credit approved</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Affordability passed</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Fraud low risk</div>
+                      </>
                     ) : (
-                      <div className="rounded-xl border border-red-500/40 bg-red-50 px-4 py-3 text-sm text-red-700">
-                        We could not complete this order automatically. The verification outcome has been sent for manual review.
-                      </div>
+                      <>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">OTP verified</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Trusted profile</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">No KYC required</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Order confirmed</div>
+                      </>
                     )}
                   </div>
-                ) : (
-                  <div className="rounded-xl border border-pondo-line bg-pondo-surface-soft p-4">
-                    <h2 className="text-2xl font-extrabold text-pondo-navy-900">OTP Verification</h2>
-                    <p className="mt-1 text-sm text-slate-700">
-                      We sent a one-time PIN by SMS to <span className="font-bold">{capturedPhone}</span>. Verify the OTP to continue. KYC, credit, fraud, and affordability checks will run securely in the backend after OTP verification.
-                    </p>
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <button
-                        onClick={onSendOtp}
-                        disabled={busy || !isSaidValid || !capturedPhone.trim()}
-                        className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60"
-                      >
-                        Resend OTP to {capturedPhone}
-                      </button>
-                      {demoOtp ? <div className="text-xs text-emerald-700">Demo OTP: {demoOtp}</div> : null}
-                    </div>
-                    <div className="mt-3 flex gap-2">
-                      <input
-                        value={otpInput}
-                        onChange={(e) => setOtpInput(e.target.value)}
-                        placeholder="Enter OTP"
-                        className="w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-slate-800"
-                      />
-                      <button
-                        onClick={onVerifyOtp}
-                        disabled={busy || !otpRequestId || !otpInput.trim()}
-                        className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60"
-                      >
-                        {busy ? "Verifying..." : "Verify OTP"}
-                      </button>
-                    </div>
-                    {otpVerified ? <div className="mt-2 text-sm font-semibold text-emerald-700">OTP verified - identity confirmed</div> : null}
-                  </div>
-                )}
-              </div>
-            ) : null}
-
-            {step === 4 && vetResult ? (
-              <div className="space-y-4">
-                <h2 className="text-2xl font-extrabold">Checks Completed</h2>
-                <div className="rounded-xl border border-pondo-line bg-pondo-surface-soft text-slate-800">
-                  <div className="flex items-center justify-between border-b border-slate-300 px-4 py-3"><span>TransUnion ITC Credit Check</span><span className="font-bold">Score: {vetResult.transunionScore} - {vetResult.transunionApproved ? "Approved" : "Declined"}</span></div>
-                  <div className="flex items-center justify-between border-b border-slate-300 px-4 py-3"><span>KYC Biometric Verification</span><span className="font-bold">{vetResult.kycIdentityVerified ? "Identity Verified" : "Verification Failed"}</span></div>
-                  <div className="flex items-center justify-between border-b border-slate-300 px-4 py-3"><span>Experian Affordability Vetting</span><span className="font-bold">Income {new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR", maximumFractionDigits: 0 }).format(vetResult.experianIncome)}/mo</span></div>
-                  <div className="flex items-center justify-between px-4 py-3"><span>Python ML Fraud Detection Score</span><span className="font-bold">Score: {vetResult.fraudScore.toFixed(2)} ({vetResult.fraudScore <= 0.08 ? "Low Risk" : "High Risk"})</span></div>
                 </div>
-
-                <div className={["rounded-lg px-4 py-3 text-sm font-bold", vetResult.approved ? "border border-emerald-500/40 bg-emerald-50 text-emerald-800" : "border border-red-500/40 bg-red-50 text-red-700"].join(" ")}>
-                  {vetResult.approved ? "All checks passed - customer approved for checkout" : "Checks failed - transaction cannot continue"}
-                </div>
-
-                <button onClick={onConfirmRoute} disabled={!vetResult.approved} className={primaryCtaClass}>
-                  Confirm Payment Route
-                </button>
-              </div>
-            ) : null}
-
-            {step === 5 && routeDecision ? (
-              <div className="space-y-4">
-                <h2 className="text-2xl font-extrabold">Finalize Purchase</h2>
-                <div className="rounded-xl border border-pondo-line bg-pondo-surface-soft p-4">
-                  <div className="mb-2 text-sm font-bold text-pondo-navy-800">PED (Payment Enabled Delivery)</div>
-                  <div className="grid gap-2 text-sm sm:grid-cols-2">
-                    <div>Driver: <span className="font-semibold">{routeDecision.driverName}</span></div>
-                    <div>Badge: <span className="font-semibold">{routeDecision.driverBadge}</span></div>
-                    <div>Vehicle: <span className="font-semibold">{routeDecision.vehicle}</span></div>
-                    <div>ETA: <span className="font-semibold">{routeDecision.etaMinutes} min</span></div>
-                  </div>
-                  <div className="mt-3 text-xs text-slate-600">PED device and payment rails are active, the driver is KYC-cleared, and the custody chain is verified.</div>
-                </div>
-
-                <label className="block">
-                  <div className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-600">Payment Method</div>
-                  <select
-                    value={selectedPaymentMethod}
-                    onChange={(e) => setSelectedPaymentMethod(e.target.value as PaymentMethod)}
-                    className="w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-slate-800"
-                  >
-                    {CUSTOMER_PAYMENT_OPTIONS.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="mt-2 text-xs text-slate-500">{selectedPaymentMethodMeta.helper}</div>
-                </label>
-
-                <div className="rounded-xl border border-[#d64534]/35 bg-[#fff6ea] px-4 py-3 text-sm text-[#914500]">
-                  Final T&C: By clicking &quot;Complete Purchase&quot; you confirm payment for {cartCount} cart item(s), total {money(finalCustomerShareCents)}, using {selectedPaymentMethodMeta.label}, and consent to PED delivery.
-                </div>
-                <label>
-                  <div className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-600">PONDO Settlement Account</div>
-                  <select value={settlementBank} onChange={(e) => setSettlementBank(e.target.value as SettlementBank)} className="w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-slate-800">
-                    <option value="absa">ABSA Business Account</option>
-                    <option value="fnb">FNB Business Account</option>
-                    <option value="standard_bank">Standard Bank Business Account</option>
-                  </select>
-                </label>
-                <div className="rounded-lg border border-emerald-500/30 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                  Final notification is released only after on-site arrival is confirmed and the {selectedPaymentMethodMeta.label} payment succeeds.
-                </div>
-
-                <button
-                  onClick={onCompletePurchase}
-                  disabled={busy || Boolean(completedOrderId) || cartLines.length === 0}
-                  className="w-full rounded-xl bg-gradient-to-r from-[#d64534] to-[#d95a18] px-4 py-3 text-2xl font-extrabold text-white shadow-[0_10px_22px_rgba(217,90,24,0.35)] hover:from-[#ea6a3f] hover:to-[#d64534] disabled:opacity-60"
-                >
-                  {busy ? "Processing..." : completedOrderId ? "Purchase Completed" : "Complete Purchase - Clear Transaction"}
-                </button>
-
-                {completedOrderId ? (
-                  <div className="rounded-xl border border-emerald-500/40 bg-emerald-50 p-4 text-sm text-emerald-800">
-                    Transaction cleared successfully. Order ID: <span className="font-mono">{completedOrderId}</span>
-                    {paymentSettlement ? (
-                      <div className="mt-2">
-                        {selectedPaymentMethodMeta.label} funds settled to <span className="font-semibold">{paymentSettlement.bankLabel}</span> ({paymentSettlement.accountRef}).
-                      </div>
-                    ) : null}
-                    <div className="mt-3 flex gap-3">
-                      <button onClick={() => router.push(`/PondoDemo/confirmation/${completedOrderId}`)} className="rounded-lg bg-emerald-600 px-4 py-2 font-bold text-white hover:bg-emerald-500">View Confirmation</button>
-                    </div>
-                  </div>
-                ) : null}
               </div>
             ) : null}
 
@@ -1150,74 +991,15 @@ export default function PondoCheckoutPage() {
                 )}
               </div>
               <div className="mt-3 text-3xl font-extrabold text-pondo-orange-500">{money(cartSubtotalCents)}</div>
-            </div>
-
-            <div className="rounded-2xl border border-pondo-line bg-white p-4">
-              <div className="mb-2 text-sm font-bold uppercase tracking-widest text-pondo-navy-800">PONDO Trust Guarantee</div>
-              <ul className="space-y-2 text-sm text-slate-700">
-                <li>TLS 1.3 End-to-End Encryption</li>
-                <li>KYC Identity Verified</li>
-                <li>ITC & Affordability Checked</li>
-                <li>ML Fraud Detection Active</li>
-                <li>POPIA Compliant</li>
-                <li>PED Vetted Delivery</li>
-              </ul>
-            </div>
-
-            <div className="rounded-2xl border border-pondo-line bg-white p-4">
-              <div className="mb-2 text-sm font-bold uppercase tracking-widest text-pondo-navy-800">Partner Integrations</div>
-              <div className="flex flex-wrap gap-2 text-xs">
-                {["Amazon SA", "Takealot", "TransUnion", "Experian", "Twilio SMS", "KYC Provider"].map((tag) => (
-                  <span key={tag} className="rounded border border-pondo-line bg-pondo-surface-soft px-2 py-1 text-slate-700">{tag}</span>
-                ))}
-              </div>
+              {step === 4 && paymentSettlement ? (
+                <div className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                  Supabase settlement recorded to {paymentSettlement.bankLabel} using {selectedPaymentMethodMeta.label}.
+                </div>
+              ) : null}
             </div>
           </aside>
         </div>
-
-
-
-        {partnerTrackingView.show && showFulfilmentTracking ? (
-          <section className="mt-6 rounded-2xl border border-pondo-line bg-white p-5 shadow-sm">
-            <h3 className="text-2xl font-black text-pondo-navy-900">Partner Delivery Confirmation Sequence</h3>
-            <div className="mt-2 text-sm text-slate-600">
-              {partnerTrackingView.processLabel} • {partnerTrackingView.progressPct}% complete
-            </div>
-            <div className="mt-2 text-sm text-slate-600">{partnerTrackingView.helperText}</div>
-            <div className="mt-3 h-2 overflow-hidden rounded bg-[#dbe8ff]">
-              <div
-                className="h-full bg-pondo-orange-500 transition-all duration-500"
-                style={{ width: `${partnerTrackingView.progressPct}%` }}
-              />
-            </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-              {partnerTrackingView.steps.map((item) => (
-                <div
-                  key={item.title}
-                  className={[
-                    "rounded-xl border p-4 transition",
-                    item.status === "completed" ? "border-emerald-300 bg-emerald-50" : item.status === "active" ? "border-pondo-orange-500 bg-[#fff6ea]" : "border-pondo-line bg-[#f7faff]",
-                  ].join(" ")}
-                >
-                  <div className="text-xs font-black uppercase tracking-[0.15em] text-slate-500">Step {item.index}</div>
-                  <div className="mt-1 text-xl font-extrabold leading-tight text-pondo-navy-900">{item.title}</div>
-                  <div className="mt-2 text-sm text-slate-700">{item.detail}</div>
-                  <div className="mt-3 text-[11px] font-bold uppercase tracking-wide text-pondo-navy-800">{item.status}</div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
-              PONDO keeps the delivery loop, PED validation, and partner orchestration running in the backend while this customer view shows partner-facing confirmation milestones only.
-            </div>
-            {driverArrivedOnSite && paymentSettlement ? (
-              <div className="mt-3 rounded-lg border border-emerald-500/35 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                Driver arrival has been confirmed and the {selectedPaymentMethodMeta.label} payment has cleared. PONDO has been notified and settlement is recorded into {paymentSettlement.bankLabel}.
-              </div>
-            ) : null}
-          </section>
-        ) : null}
       </div>
     </div>
   );
 }
-

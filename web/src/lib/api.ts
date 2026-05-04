@@ -110,6 +110,32 @@ export type PartnerBootstrapSession = {
   };
 };
 
+export type AddressSuggestion = {
+  placeId: string;
+  text: string;
+  mainText: string;
+  secondaryText: string;
+};
+
+export type GoogleResolvedAddress = {
+  formattedAddress: string;
+  city: string;
+  province: string;
+  postalCode: string;
+  placeId: string;
+  latitude: number | null;
+  longitude: number | null;
+};
+
+export type AddressValidationResult = GoogleResolvedAddress & {
+  verdict: "validated" | "needs_confirmation";
+  addressComplete: boolean;
+  hasInferredComponents: boolean;
+  hasReplacedComponents: boolean;
+  hasUnconfirmedComponents: boolean;
+  possibleNextAction: string;
+};
+
 const configuredApiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 const API_BASE_URLS = Array.from(new Set([configuredApiBase, "", "http://localhost:4100", "http://localhost:4000"].filter((value) => value !== undefined))) as string[];
 const API_BASE_URL = API_BASE_URLS[0];
@@ -344,6 +370,27 @@ export async function sendOtp(input: { sessionId: string; channel: "sms" | "emai
 
 export async function verifyOtp(input: { requestId: string; code: string }) {
   return apiFetch<{ ok: true; sessionId: string }>("/api/pondo/verify-otp", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function autocompleteAddress(input: { input: string; sessionToken?: string }) {
+  return apiFetch<{ suggestions: AddressSuggestion[] }>("/api/pondo/address/autocomplete", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getPlaceAddress(input: { placeId: string; sessionToken?: string }) {
+  return apiFetch<{ place: GoogleResolvedAddress }>("/api/pondo/address/place", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function validateCheckoutAddress(input: { address: string; sessionToken?: string }) {
+  return apiFetch<{ validation: AddressValidationResult }>("/api/pondo/address/validate", {
     method: "POST",
     body: JSON.stringify(input),
   });

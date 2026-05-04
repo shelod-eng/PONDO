@@ -12,9 +12,9 @@ const schema = z.object({
     fullName: z.string().min(1),
     phone: z.string().min(5),
     address1: z.string().min(1),
-    city: z.string().min(1),
-    province: z.string().min(1),
-    postalCode: z.string().min(3),
+    city: z.string().trim().optional().default(""),
+    province: z.string().trim().optional().default(""),
+    postalCode: z.string().trim().optional().default(""),
   }),
   paymentMethod: z.enum(["card", "card_3ds", "debit_card", "eft", "payfast", "bnpl", "speedpoint", "ussd", "evoucher_wallet"]),
 });

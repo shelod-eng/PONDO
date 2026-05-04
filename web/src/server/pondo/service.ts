@@ -56,7 +56,19 @@ const partnerSeeds = {
     province: "KwaZulu-Natal",
     postalCode: "4001",
     geoLocation: "-29.8587, 31.0218",
-    monthlyIncome: 14000,
+    monthlyIncome: 19000,
+    affordabilityBand: "B",
+  },
+  "mandla@email.com": {
+    fullName: "Mandla Khumalo",
+    idNumber: "9002145809084",
+    phone: "+27 83 456 7721",
+    address: "44 Luthuli Ave, Umlazi, KZN",
+    city: "Durban",
+    province: "KwaZulu-Natal",
+    postalCode: "4031",
+    geoLocation: "-29.9708, 30.9245",
+    monthlyIncome: 22000,
     affordabilityBand: "B",
   },
   "amara@email.com": {
@@ -70,6 +82,18 @@ const partnerSeeds = {
     geoLocation: "-26.1076, 28.0567",
     monthlyIncome: 36000,
     affordabilityBand: "A+",
+  },
+  "gogo@email.com": {
+    fullName: "Gogo Mokoena",
+    idNumber: "5506240800087",
+    phone: "+27 78 222 3344",
+    address: "17 Church St, Polokwane, Limpopo",
+    city: "Polokwane",
+    province: "Limpopo",
+    postalCode: "0700",
+    geoLocation: "-23.9045, 29.4689",
+    monthlyIncome: 12000,
+    affordabilityBand: "A",
   },
 } as const;
 
@@ -329,6 +353,25 @@ function discountedPrice(row: Record<string, unknown>) {
   return Math.round(Number(row.price_cents || 0) * (1 - Number(row.discount_pct || 0) / 100));
 }
 
+function deriveDeliveryLocation(address1: string, city: string, province: string, postalCode: string) {
+  const normalizedAddress = String(address1 || "").trim();
+  const tokens = normalizedAddress
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const detectedPostalCode = postalCode.trim() || normalizedAddress.match(/\b\d{4}\b/)?.[0] || "";
+  const cleanedLastToken = tokens[tokens.length - 1]?.replace(/\b\d{4}\b/g, "").trim() || "";
+  const fallbackProvince = tokens.length >= 3 ? cleanedLastToken : "";
+  const fallbackCity = tokens.length >= 3 ? tokens[tokens.length - 2] : tokens.length === 2 ? tokens[tokens.length - 1] : "";
+
+  return {
+    city: city.trim() || fallbackCity,
+    province: province.trim() || fallbackProvince,
+    postalCode: detectedPostalCode,
+  };
+}
+
 export async function createOrder(input: {
   actor: string;
   customerEmail: string;
@@ -337,13 +380,19 @@ export async function createOrder(input: {
   paymentMethod: PaymentMethod;
 }) {
   const pool = getPool();
+  const resolvedDelivery = deriveDeliveryLocation(
+    input.delivery.address1,
+    input.delivery.city,
+    input.delivery.province,
+    input.delivery.postalCode,
+  );
   const customer = await ensureCustomerByEmail(input.customerEmail, {
     fullName: input.delivery.fullName,
     phone: input.delivery.phone,
     address: input.delivery.address1,
-    city: input.delivery.city,
-    province: input.delivery.province,
-    postalCode: input.delivery.postalCode,
+    city: resolvedDelivery.city,
+    province: resolvedDelivery.province,
+    postalCode: resolvedDelivery.postalCode,
   });
 
   const products = await Promise.all(input.items.map((item) => getProductById(item.productId)));
@@ -367,7 +416,21 @@ export async function createOrder(input: {
     `insert into orders
       (id, order_number, customer_id, partner_code, delivery_snapshot, subtotal_cents, delivery_cents, total_cents, currency, status)
      values ($1,$2,$3,$4,$5,$6,$7,$8,'ZAR','created')`,
-    [orderId, orderNumber, customer.id, "amazon", JSON.stringify(input.delivery), subtotal, 0, subtotal],
+    [
+      orderId,
+      orderNumber,
+      customer.id,
+      "amazon",
+      JSON.stringify({
+        ...input.delivery,
+        city: resolvedDelivery.city,
+        province: resolvedDelivery.province,
+        postalCode: resolvedDelivery.postalCode,
+      }),
+      subtotal,
+      0,
+      subtotal,
+    ],
   );
 
   for (let index = 0; index < input.items.length; index += 1) {
@@ -392,7 +455,21 @@ export async function createOrder(input: {
   await pool.query(
     `insert into audit_entries (transaction_id, order_id, actor, action, data)
      values ($1,$2,$3,'order.created',$4)`,
-    [transactionId, orderId, input.actor, JSON.stringify({ items: input.items, delivery: input.delivery, paymentMethod: input.paymentMethod })],
+    [
+      transactionId,
+      orderId,
+      input.actor,
+      JSON.stringify({
+        items: input.items,
+        delivery: {
+          ...input.delivery,
+          city: resolvedDelivery.city,
+          province: resolvedDelivery.province,
+          postalCode: resolvedDelivery.postalCode,
+        },
+        paymentMethod: input.paymentMethod,
+      }),
+    ],
   );
 
   const tx = await pool.query("select * from transactions where id = $1", [transactionId]);

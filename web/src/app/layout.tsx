@@ -4,6 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "PONDO Demo Portal",
   description: "Unified checkout + sponsor portal demo (PONDO-TRD-001)",
+  metadataBase: new URL("https://www.pondo-pay.online"),
 };
 
 export default function RootLayout({

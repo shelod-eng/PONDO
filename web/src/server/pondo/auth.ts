@@ -7,7 +7,9 @@ const authUsers = new Map(
     { username: "thabo@email.com", password: "demo", role: "customer" },
     { username: "naledi@email.com", password: "demo", role: "customer" },
     { username: "sipho@email.com", password: "demo", role: "customer" },
+    { username: "mandla@email.com", password: "demo", role: "customer" },
     { username: "amara@email.com", password: "demo", role: "customer" },
+    { username: "gogo@email.com", password: "demo", role: "customer" },
     { username: "sponsor@example.com", password: "demo", role: "sponsor" },
   ].map((user) => [user.username, user]),
 );
