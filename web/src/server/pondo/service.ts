@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import { getPool } from "./db";
+import { assessGeoRisk, deriveManualDeliveryLocation, lookupIpGeo, type ClientGeo, type RiskAssessment, type ValidatedAddress } from "./risk";
 
 type PartnerName = "amazon" | "temu" | "takealot" | "woocommerce" | "shopify";
 type PaymentMethod =
@@ -122,6 +123,8 @@ const deliverySteps = [
   { title: "On-Site Verification", detail: "Identity is verified at the door with physical identification checks." },
   { title: "Conclusion", detail: "Final payment confirmation automatically triggers invoice initiation." },
 ];
+
+let riskSchemaReady: Promise<void> | null = null;
 
 function nowIso() {
   return new Date().toISOString();
@@ -353,23 +356,32 @@ function discountedPrice(row: Record<string, unknown>) {
   return Math.round(Number(row.price_cents || 0) * (1 - Number(row.discount_pct || 0) / 100));
 }
 
-function deriveDeliveryLocation(address1: string, city: string, province: string, postalCode: string) {
-  const normalizedAddress = String(address1 || "").trim();
-  const tokens = normalizedAddress
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  const detectedPostalCode = postalCode.trim() || normalizedAddress.match(/\b\d{4}\b/)?.[0] || "";
-  const cleanedLastToken = tokens[tokens.length - 1]?.replace(/\b\d{4}\b/g, "").trim() || "";
-  const fallbackProvince = tokens.length >= 3 ? cleanedLastToken : "";
-  const fallbackCity = tokens.length >= 3 ? tokens[tokens.length - 2] : tokens.length === 2 ? tokens[tokens.length - 1] : "";
-
-  return {
-    city: city.trim() || fallbackCity,
-    province: province.trim() || fallbackProvince,
-    postalCode: detectedPostalCode,
-  };
+async function ensureRiskSchema(pool: any) {
+  if (!riskSchemaReady) {
+    riskSchemaReady = (async () => {
+      await pool.query(`
+        alter table transactions add column if not exists risk_score integer;
+        alter table transactions add column if not exists risk_level text;
+        alter table transactions add column if not exists risk_decision text;
+        alter table transactions add column if not exists risk_factors jsonb default '[]'::jsonb;
+        alter table transactions add column if not exists ip_address text;
+        alter table transactions add column if not exists ip_city text;
+        alter table transactions add column if not exists ip_province text;
+        alter table transactions add column if not exists ip_country text;
+        alter table transactions add column if not exists ip_postal_code text;
+        alter table transactions add column if not exists ip_latitude double precision;
+        alter table transactions add column if not exists ip_longitude double precision;
+        alter table transactions add column if not exists device_fingerprint text;
+        alter table transactions add column if not exists validated_city text;
+        alter table transactions add column if not exists validated_province text;
+        alter table transactions add column if not exists validated_postal_code text;
+        alter table transactions add column if not exists validated_latitude double precision;
+        alter table transactions add column if not exists validated_longitude double precision;
+        alter table transactions add column if not exists verified_status text;
+      `);
+    })();
+  }
+  await riskSchemaReady;
 }
 
 export async function createOrder(input: {
@@ -378,14 +390,30 @@ export async function createOrder(input: {
   items: Array<{ productId: string; qty: number }>;
   delivery: { fullName: string; phone: string; address1: string; city: string; province: string; postalCode: string; deliveryDate?: string; deliveryWindow?: string };
   paymentMethod: PaymentMethod;
+  riskContext?: {
+    deviceFingerprint?: string;
+    clientGeo?: ClientGeo;
+    validatedAddress?: ValidatedAddress;
+    otpVerified?: boolean;
+    saidVerified?: boolean;
+  };
+  requestIp?: string;
 }) {
   const pool = getPool();
-  const resolvedDelivery = deriveDeliveryLocation(
+  await ensureRiskSchema(pool);
+  const resolvedDelivery = deriveManualDeliveryLocation(
     input.delivery.address1,
     input.delivery.city,
     input.delivery.province,
     input.delivery.postalCode,
   );
+  const validatedAddress = {
+    city: input.riskContext?.validatedAddress?.city || resolvedDelivery.city,
+    province: input.riskContext?.validatedAddress?.province || resolvedDelivery.province,
+    postalCode: input.riskContext?.validatedAddress?.postalCode || resolvedDelivery.postalCode,
+    latitude: input.riskContext?.validatedAddress?.latitude ?? null,
+    longitude: input.riskContext?.validatedAddress?.longitude ?? null,
+  };
   const customer = await ensureCustomerByEmail(input.customerEmail, {
     fullName: input.delivery.fullName,
     phone: input.delivery.phone,
@@ -411,6 +439,16 @@ export async function createOrder(input: {
     currency: "ZAR",
     customerId: customer.email,
   });
+  const ipGeo = await lookupIpGeo(input.requestIp || "", input.riskContext?.clientGeo);
+  const riskAssessment = assessGeoRisk({
+    ipAddress: input.requestIp || input.riskContext?.clientGeo?.ip || "",
+    ipGeo,
+    deliveryGeo: validatedAddress,
+    amountCents: subtotal,
+    deviceFingerprint: input.riskContext?.deviceFingerprint,
+    otpVerified: input.riskContext?.otpVerified,
+    saidVerified: input.riskContext?.saidVerified,
+  });
 
   await pool.query(
     `insert into orders
@@ -426,6 +464,8 @@ export async function createOrder(input: {
         city: resolvedDelivery.city,
         province: resolvedDelivery.province,
         postalCode: resolvedDelivery.postalCode,
+        validatedAddress,
+        riskAssessment,
       }),
       subtotal,
       0,
@@ -447,9 +487,39 @@ export async function createOrder(input: {
 
   await pool.query(
     `insert into transactions
-      (id, order_id, external_ref, customer_id, amount_cents, currency, payment_method, gateway, gateway_status, credit_tier, qr_payload, status)
-     values ($1,$2,$3,$4,$5,'ZAR',$6,$7,'Awaiting_Payment',null,$8,'Awaiting_Payment')`,
-    [transactionId, orderId, null, customer.email, subtotal, input.paymentMethod, paymentMethodMeta[input.paymentMethod].gateway, qrPayload],
+      (id, order_id, external_ref, customer_id, amount_cents, currency, payment_method, gateway, gateway_status, credit_tier, qr_payload, status,
+       risk_score, risk_level, risk_decision, risk_factors, ip_address, ip_city, ip_province, ip_country, ip_postal_code, ip_latitude, ip_longitude,
+       device_fingerprint, validated_city, validated_province, validated_postal_code, validated_latitude, validated_longitude, verified_status)
+     values ($1,$2,$3,$4,$5,'ZAR',$6,$7,'Awaiting_Payment',null,$8,'Awaiting_Payment',
+       $9,$10,$11,$12::jsonb,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
+    [
+      transactionId,
+      orderId,
+      null,
+      customer.email,
+      subtotal,
+      input.paymentMethod,
+      paymentMethodMeta[input.paymentMethod].gateway,
+      qrPayload,
+      riskAssessment.score,
+      riskAssessment.score >= 70 ? "high" : riskAssessment.score >= 40 ? "medium" : "low",
+      riskAssessment.decision,
+      JSON.stringify(riskAssessment.factors),
+      riskAssessment.ipAddress,
+      riskAssessment.ipGeo.city,
+      riskAssessment.ipGeo.province,
+      riskAssessment.ipGeo.country,
+      riskAssessment.ipGeo.postalCode,
+      riskAssessment.ipGeo.latitude,
+      riskAssessment.ipGeo.longitude,
+      input.riskContext?.deviceFingerprint || "",
+      validatedAddress.city,
+      validatedAddress.province,
+      validatedAddress.postalCode,
+      validatedAddress.latitude,
+      validatedAddress.longitude,
+      riskAssessment.verifiedStatus,
+    ],
   );
 
   await pool.query(
@@ -488,8 +558,14 @@ export async function createOrder(input: {
     ],
   );
 
+  await pool.query(
+    `insert into audit_entries (transaction_id, order_id, actor, action, data)
+     values ($1,$2,$3,'risk.assessed',$4)`,
+    [transactionId, orderId, input.actor, JSON.stringify(riskAssessment)],
+  );
+
   const tx = await pool.query("select * from transactions where id = $1", [transactionId]);
-  return { transaction: tx.rows[0], qrPayload };
+  return { transaction: tx.rows[0], qrPayload, riskAssessment };
 }
 
 export async function settleOrder(input: {

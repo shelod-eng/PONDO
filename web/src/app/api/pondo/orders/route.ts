@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUser } from "@/server/pondo/auth";
+import { extractClientIp } from "@/server/pondo/risk";
 import { createOrder } from "@/server/pondo/service";
 
 export const runtime = "nodejs";
@@ -19,6 +20,28 @@ const schema = z.object({
     deliveryWindow: z.string().trim().optional(),
   }),
   paymentMethod: z.enum(["card", "card_3ds", "debit_card", "eft", "payfast", "bnpl", "speedpoint", "ussd", "evoucher_wallet"]),
+  riskContext: z.object({
+    deviceFingerprint: z.string().trim().optional(),
+    clientGeo: z.object({
+      ip: z.string().trim().optional(),
+      city: z.string().trim().optional(),
+      province: z.string().trim().optional(),
+      country: z.string().trim().optional(),
+      postalCode: z.string().trim().optional(),
+      latitude: z.number().nullable().optional(),
+      longitude: z.number().nullable().optional(),
+      source: z.string().trim().optional(),
+    }).optional(),
+    validatedAddress: z.object({
+      city: z.string().trim().optional(),
+      province: z.string().trim().optional(),
+      postalCode: z.string().trim().optional(),
+      latitude: z.number().nullable().optional(),
+      longitude: z.number().nullable().optional(),
+    }).optional(),
+    otpVerified: z.boolean().optional(),
+    saidVerified: z.boolean().optional(),
+  }).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -34,6 +57,8 @@ export async function POST(req: NextRequest) {
       items: parsed.data.items,
       delivery: parsed.data.delivery,
       paymentMethod: parsed.data.paymentMethod,
+      riskContext: parsed.data.riskContext,
+      requestIp: extractClientIp(req),
     });
     return NextResponse.json(out);
   } catch (error) {

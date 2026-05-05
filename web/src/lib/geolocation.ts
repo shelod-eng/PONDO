@@ -1,10 +1,12 @@
 export type GeoLocation = {
+  ip?: string;
   city: string;
   province: string;
   country: string;
   postalCode: string;
   latitude: number;
   longitude: number;
+  source?: string;
 };
 
 /**
@@ -13,6 +15,30 @@ export type GeoLocation = {
  */
 export async function fetchGeoLocation(): Promise<GeoLocation | null> {
   try {
+    try {
+      const response = await fetch("/api/pondo/geoip", {
+        method: "GET",
+        cache: "no-store",
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data?.geo) {
+          return {
+            ip: data.geo.ip || "",
+            city: data.geo.city || "Unknown",
+            province: data.geo.province || "Unknown",
+            country: data.geo.country || "South Africa",
+            postalCode: data.geo.postalCode || "0000",
+            latitude: data.geo.latitude || 0,
+            longitude: data.geo.longitude || 0,
+            source: data.geo.source || "server_geoip",
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("server geoip fallback:", e);
+    }
+
     // Try ipapi.co first (free, no key required, ~3 requests/sec)
     try {
       const response = await fetch("https://ipapi.co/json/", { 
@@ -23,12 +49,14 @@ export async function fetchGeoLocation(): Promise<GeoLocation | null> {
       if (response.ok) {
         const data = await response.json();
         return {
+          ip: "",
           city: data.city || "Unknown",
           province: data.region || data.region_code || "Unknown",
           country: data.country_name || "South Africa",
           postalCode: data.postal || "0000",
           latitude: data.latitude || 0,
           longitude: data.longitude || 0,
+          source: "ipapi_browser",
         };
       }
     } catch (e) {
@@ -45,12 +73,14 @@ export async function fetchGeoLocation(): Promise<GeoLocation | null> {
       if (response.ok) {
         const data = await response.json();
         return {
+          ip: "",
           city: data.city || "Unknown",
           province: data.state || "Unknown",
           country: data.country_name || "South Africa",
           postalCode: data.postal || "0000",
           latitude: data.latitude || 0,
           longitude: data.longitude || 0,
+          source: "geolocation_db_browser",
         };
       }
     } catch (e) {
@@ -59,12 +89,14 @@ export async function fetchGeoLocation(): Promise<GeoLocation | null> {
 
     // Last fallback: default to Johannesburg, Gauteng
     return {
+      ip: "",
       city: "Johannesburg",
       province: "Gauteng",
       country: "South Africa",
       postalCode: "2000",
       latitude: -26.1676,
       longitude: 28.0567,
+      source: "default",
     };
   } catch (e) {
     console.error("Geolocation fetch failed:", e);

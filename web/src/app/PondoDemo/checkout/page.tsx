@@ -18,13 +18,15 @@ import {
   type PaymentSettlement,
   type PartnerBootstrapSession,
   type PartnerName,
+  type RiskAssessment,
   type Transaction,
   type GoogleResolvedAddress,
   validateCheckoutAddress,
   verifyOtp,
 } from "@/lib/api";
 import { PAYMENT_METHOD_OPTIONS, type PaymentMethod, paymentMethodLabel } from "@/lib/paymentMethods";
-import { fetchGeoLocation } from "@/lib/geolocation";
+import { createDeviceFingerprint } from "@/lib/deviceFingerprint";
+import { fetchGeoLocation, type GeoLocation } from "@/lib/geolocation";
 import { useAuth } from "@/lib/auth";
 import { usePondoCart } from "@/lib/pondoCart";
 import { FALLBACK_IMAGE, FALLBACK_PRODUCTS, IMAGE_BY_PRODUCT } from "@/lib/demoCatalog";
@@ -251,8 +253,11 @@ export default function PondoCheckoutPage() {
   const [vetResult, setVetResult] = useState<VetResult | null>(null);
   const [paymentSettlement, setPaymentSettlement] = useState<PaymentSettlement | null>(null);
   const [completedTransaction, setCompletedTransaction] = useState<Transaction | null>(null);
+  const [completedRiskAssessment, setCompletedRiskAssessment] = useState<RiskAssessment | null>(null);
   const [completedOrderId, setCompletedOrderId] = useState("");
   const [catalog, setCatalog] = useState<DemoProduct[]>(FALLBACK_PRODUCTS);
+  const [clientGeo, setClientGeo] = useState<GeoLocation | null>(null);
+  const [deviceFingerprint, setDeviceFingerprint] = useState("");
   const [, setApiLogs] = useState<string[]>(["Awaiting transaction initiation..."]);
 
   const customer = session?.customer || null;
@@ -287,6 +292,12 @@ export default function PondoCheckoutPage() {
   }, []);
 
   useEffect(() => {
+    createDeviceFingerprint()
+      .then((fingerprint) => setDeviceFingerprint(fingerprint))
+      .catch(() => setDeviceFingerprint(""));
+  }, []);
+
+  useEffect(() => {
     if (!session?.customer) return;
 
     setCapturedFullName(session.customer.fullName);
@@ -305,10 +316,7 @@ export default function PondoCheckoutPage() {
     fetchGeoLocation()
       .then((geo) => {
         if (geo) {
-          setCapturedCity(geo.city);
-          setCapturedProvince(geo.province);
-          setCapturedPostalCode(geo.postalCode);
-          setCapturedAddress(formatCombinedAddress(session.customer.address, geo.city, geo.province, geo.postalCode));
+          setClientGeo(geo);
         }
         log(`Geolocation detected: ${geo?.city}, ${geo?.province}`);
       })
@@ -376,6 +384,7 @@ export default function PondoCheckoutPage() {
     () => cartLines.reduce((sum, line) => sum + line.lineCents, 0),
     [cartLines],
   );
+  const requiresEnhancedRiskChecks = cartSubtotalCents > 1_000_000;
   const normalizedIdNumber = capturedIdNumber.replace(/\D/g, "");
   const isSaidComplete = normalizedIdNumber.length === 13;
   const isSaidValid = isSaidComplete && validateSAID(normalizedIdNumber);
@@ -416,6 +425,7 @@ export default function PondoCheckoutPage() {
       setVetResult(null);
       setPaymentSettlement(null);
       setCompletedTransaction(null);
+      setCompletedRiskAssessment(null);
       setCompletedOrderId("");
       setDeliveryDate("");
       setDeliveryWindow("");
@@ -553,7 +563,7 @@ export default function PondoCheckoutPage() {
   async function runScreeningJourney() {
     if (!customer) return null;
 
-    if (selectedProfile.screeningMode === "skip") {
+    if (selectedProfile.screeningMode === "skip" && !requiresEnhancedRiskChecks) {
       const autoApproved: VetResult = {
         transunionScore: 0,
         transunionApproved: true,
@@ -592,6 +602,9 @@ export default function PondoCheckoutPage() {
     log(`Experian affordability: income ${new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR", maximumFractionDigits: 0 }).format(experianIncome)}/mo`);
     log(`Geo-location reviewed: ${capturedCity}, ${capturedProvince}`);
     log(`Python fraud score: ${fraudScore.toFixed(2)} (${fraudScore <= 0.08 ? "low risk" : "high risk"})`);
+    if (requiresEnhancedRiskChecks) {
+      log("High-value order detected (> R10,000). Enhanced risk checks were enforced.");
+    }
     log(approved ? "All checks passed - customer approved for checkout" : "Checks failed - manual review required");
     return result;
   }
@@ -614,6 +627,30 @@ export default function PondoCheckoutPage() {
           deliveryWindow,
         },
         paymentMethod: selectedPaymentMethod,
+        riskContext: {
+          deviceFingerprint,
+          clientGeo: clientGeo
+            ? {
+                ip: clientGeo.ip,
+                city: clientGeo.city,
+                province: clientGeo.province,
+                country: clientGeo.country,
+                postalCode: clientGeo.postalCode,
+                latitude: clientGeo.latitude,
+                longitude: clientGeo.longitude,
+                source: clientGeo.source,
+              }
+            : undefined,
+          validatedAddress: {
+            city: addressValidation?.city || "",
+            province: addressValidation?.province || "",
+            postalCode: addressValidation?.postalCode || "",
+            latitude: addressValidation?.latitude ?? null,
+            longitude: addressValidation?.longitude ?? null,
+          },
+          otpVerified: true,
+          saidVerified: isSaidValid,
+        },
       });
     };
 
@@ -631,11 +668,16 @@ export default function PondoCheckoutPage() {
 
     setCompletedOrderId(submitted.transaction.id);
     setCompletedTransaction(submitted.transaction);
+    setCompletedRiskAssessment(submitted.riskAssessment || null);
     setPaymentSettlement(null);
     log(`Transaction created: ${submitted.transaction.id}`);
     log(`Payment method prepared: ${paymentMethodLabel(selectedPaymentMethod)}`);
     log("Order has been written to Supabase and is awaiting PED payment at delivery.");
     log("gateway_status and status are set to Awaiting_Payment until driver-side collection completes.");
+    if (submitted.riskAssessment) {
+      log(`Risk score recorded: ${submitted.riskAssessment.score} (${submitted.riskAssessment.decision})`);
+      log(`Risk factors: ${submitted.riskAssessment.factors.join(" | ")}`);
+    }
     log(`Order submitted using ${cartLines.length} cart item(s)`);
     log(`Checkout verification completed for ${session.partnerLabel}.`);
   }
@@ -652,7 +694,11 @@ export default function PondoCheckoutPage() {
       if (selectedProfile.screeningMode === "full") {
         setProcessingMessage("Running KYC, credit, affordability, fraud, and geolocation checks...");
       } else {
-        setProcessingMessage("Profile is exempt from background checks. Finalizing order confirmation...");
+        setProcessingMessage(
+          requiresEnhancedRiskChecks
+            ? "High-value order detected. Running enhanced fraud and geolocation checks..."
+            : "Profile is exempt from background checks. Finalizing order confirmation...",
+        );
       }
 
       const result = await runScreeningJourney();
@@ -937,7 +983,9 @@ export default function PondoCheckoutPage() {
                     We sent a one-time PIN by SMS to <span className="font-bold">{capturedPhone}</span>. Verify the OTP to continue.
                     {selectedProfile.screeningMode === "full"
                       ? " KYC, credit, fraud, affordability, and geolocation checks will run automatically after verification."
-                      : " This profile will move directly to order confirmation after verification."}
+                      : requiresEnhancedRiskChecks
+                        ? " High-value risk controls are active for this order, so enhanced checks will still run after verification."
+                        : " This profile will move directly to order confirmation after verification."}
                   </p>
 
                   <div className="mt-5 flex flex-wrap items-center gap-2">
@@ -1013,6 +1061,14 @@ export default function PondoCheckoutPage() {
                   <div className="mt-5 rounded-xl border border-pondo-line bg-[#f7faff] px-4 py-3 text-sm text-slate-700">
                     Email and SMS notifications include the order summary, delivery address, estimated fulfilment date, and the PONDO verification outcome. Settlement and reconciliation will only update after PED payment is completed at the customer doorstep.
                   </div>
+
+                  {completedRiskAssessment ? (
+                    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                      <div className="font-bold text-pondo-navy-900">Geo-risk score: {completedRiskAssessment.score}</div>
+                      <div className="mt-1">Decision: {completedRiskAssessment.decision}</div>
+                      <div className="mt-1">Verification: {completedRiskAssessment.verifiedStatus}</div>
+                    </div>
+                  ) : null}
 
                   <div className="mt-4 flex flex-wrap gap-3">
                     <button onClick={() => router.push(`/PondoDemo/confirmation/${completedOrderId}`)} className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400">

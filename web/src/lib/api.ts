@@ -19,6 +19,10 @@ export type Transaction = {
   created_at: string;
   updated_at: string;
   external_ref: string | null;
+  risk_score?: number | null;
+  risk_level?: string | null;
+  risk_decision?: string | null;
+  verified_status?: string | null;
 };
 
 export type AuditEntry = { at: string; actor: string; action: string; data: unknown };
@@ -47,6 +51,58 @@ export type DeliveryDetails = {
 };
 
 export type DemoOrderDetail = { transaction: Transaction; details: unknown; audit: AuditEntry[] };
+export type RiskAssessment = {
+  score: number;
+  decision: "auto_approve" | "review" | "manual_review";
+  factors: string[];
+  ipAddress: string;
+  ipGeo: {
+    city: string;
+    province: string;
+    country: string;
+    postalCode: string;
+    latitude: number | null;
+    longitude: number | null;
+    source: string;
+  };
+  deliveryGeo: {
+    city: string;
+    province: string;
+    postalCode: string;
+    latitude: number | null;
+    longitude: number | null;
+  };
+  flags: {
+    ipMismatch: boolean;
+    highRiskZone: boolean;
+    highValue: boolean;
+    fingerprintPresent: boolean;
+    nonSouthAfricanIp: boolean;
+  };
+  verifiedStatus: string;
+};
+export type OrderRiskContext = {
+  deviceFingerprint?: string;
+  clientGeo?: {
+    ip?: string;
+    city?: string;
+    province?: string;
+    country?: string;
+    postalCode?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    source?: string;
+  };
+  validatedAddress?: {
+    city?: string;
+    province?: string;
+    postalCode?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+  };
+  otpVerified?: boolean;
+  saidVerified?: boolean;
+};
 export type DeliveryProcessStep = {
   index: number;
   title: string;
@@ -285,9 +341,9 @@ export async function simulateDemoCredit(input: { saId: string; bureau: "transun
 
 export async function createDemoOrder(
   token: string,
-  input: { customerId: string; items: Array<{ productId: string; qty: number }>; delivery: DeliveryDetails; paymentMethod: PaymentMethod },
+  input: { customerId: string; items: Array<{ productId: string; qty: number }>; delivery: DeliveryDetails; paymentMethod: PaymentMethod; riskContext?: OrderRiskContext },
 ) {
-  return apiFetch<{ transaction: Transaction; qrPayload: string }>("/api/pondo/orders", { method: "POST", token, body: JSON.stringify(input) });
+  return apiFetch<{ transaction: Transaction; qrPayload: string; riskAssessment: RiskAssessment }>("/api/pondo/orders", { method: "POST", token, body: JSON.stringify(input) });
 }
 
 export async function bnplVetDemoOrder(token: string, id: string, input: { saId: string; bureau: "transunion" | "experian" }) {
