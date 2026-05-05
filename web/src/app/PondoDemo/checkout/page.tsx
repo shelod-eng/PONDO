@@ -100,6 +100,11 @@ const DEMO_CUSTOMER_PROFILES: DemoCustomerProfile[] = [
   },
 ];
 
+const DELIVERY_TIME_SLOTS = [
+  { id: "09:00-11:00", label: "09:00 - 11:00" },
+  { id: "12:00-15:00", label: "12:00 - 15:00" },
+] as const;
+
 function money(cents: number) {
   return new Intl.NumberFormat("en-ZA", {
     style: "currency",
@@ -130,6 +135,31 @@ function etaDateLabel() {
 
 function formatCombinedAddress(address: string, city: string, province: string, postalCode: string) {
   return [address, city, province, postalCode].map((part) => part.trim()).filter(Boolean).join(", ");
+}
+
+function toDateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function minDeliveryDateValue() {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  return toDateInputValue(date);
+}
+
+function formatDeliveryDateLabel(value: string) {
+  if (!value) return "";
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat("en-ZA", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).format(parsed);
 }
 
 function createAddressSessionToken() {
@@ -204,6 +234,8 @@ export default function PondoCheckoutPage() {
   const [capturedCity, setCapturedCity] = useState("");
   const [capturedProvince, setCapturedProvince] = useState("");
   const [capturedPostalCode, setCapturedPostalCode] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
+  const [deliveryWindow, setDeliveryWindow] = useState("");
   const [geoLocationLoading, setGeoLocationLoading] = useState(false);
   const [saidBlurred, setSaidBlurred] = useState(false);
   const [addressSessionToken, setAddressSessionToken] = useState("");
@@ -224,6 +256,11 @@ export default function PondoCheckoutPage() {
 
   const customer = session?.customer || null;
   const cartCount = cart.count;
+  const minimumDeliveryDate = useMemo(() => minDeliveryDateValue(), []);
+  const selectedDeliverySlot = useMemo(
+    () => DELIVERY_TIME_SLOTS.find((slot) => slot.id === deliveryWindow) || null,
+    [deliveryWindow],
+  );
   const selectedProfile = useMemo(
     () => DEMO_CUSTOMER_PROFILES.find((profile) => profile.email === email) || DEMO_CUSTOMER_PROFILES[0],
     [email],
@@ -378,6 +415,8 @@ export default function PondoCheckoutPage() {
       setVetResult(null);
       setPaymentSettlement(null);
       setCompletedOrderId("");
+      setDeliveryDate("");
+      setDeliveryWindow("");
       setProcessingMessage("");
       setStep(2);
       log(`Partner profile fetched: ${out.session.product.name} @ ${money(out.session.product.priceCents)}`);
@@ -478,6 +517,18 @@ export default function PondoCheckoutPage() {
       setError("Please enter a valid South African ID number before proceeding.");
       return;
     }
+    if (!deliveryDate) {
+      setError("Please choose a delivery date before proceeding.");
+      return;
+    }
+    if (deliveryDate < minimumDeliveryDate) {
+      setError("Please choose a delivery date from tomorrow onward.");
+      return;
+    }
+    if (!deliveryWindow) {
+      setError("Please choose a delivery time slot before proceeding.");
+      return;
+    }
     if (!termsAccepted) {
       setError("Please accept Terms & Conditions before proceeding.");
       return;
@@ -557,6 +608,8 @@ export default function PondoCheckoutPage() {
           city: capturedCity,
           province: capturedProvince,
           postalCode: capturedPostalCode,
+          deliveryDate,
+          deliveryWindow,
         },
         paymentMethod: selectedPaymentMethod,
       });
@@ -827,6 +880,41 @@ export default function PondoCheckoutPage() {
                       )
                     ) : null}
                   </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-600">Delivery Date</label>
+                    <input
+                      type="date"
+                      min={minimumDeliveryDate}
+                      value={deliveryDate}
+                      onChange={(e) => setDeliveryDate(e.target.value)}
+                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800"
+                    />
+                    <p className="mt-1 text-xs text-slate-500">Choose a delivery date from tomorrow onward for managed fulfilment.</p>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-600">Delivery Time Slot</label>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {DELIVERY_TIME_SLOTS.map((slot) => {
+                        const active = deliveryWindow === slot.id;
+                        return (
+                          <button
+                            key={slot.id}
+                            type="button"
+                            onClick={() => setDeliveryWindow(slot.id)}
+                            className={[
+                              "rounded-lg border px-3 py-2 text-sm font-semibold transition",
+                              active
+                                ? "border-pondo-orange-500 bg-pondo-orange-500 text-white"
+                                : "border-pondo-line bg-white text-pondo-navy-900 hover:bg-[#eef3ff]",
+                            ].join(" ")}
+                          >
+                            {slot.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">Available delivery windows are risk-managed and verified before dispatch.</p>
+                  </div>
                 </div>
 
                 <div className="rounded-xl border border-pondo-line bg-pondo-surface-soft p-3">
@@ -916,8 +1004,8 @@ export default function PondoCheckoutPage() {
                   <div className="mt-5 border-t border-slate-200 pt-4 text-sm text-slate-800">
                     <p><span className="font-bold">Delivery to</span> {capturedFullName}, {capturedAddress}, South Africa</p>
                     <div className="mt-4">
-                      <div className="font-bold">{etaDateLabel()}</div>
-                      <div>Estimated delivery</div>
+                      <div className="font-bold">{deliveryDate ? formatDeliveryDateLabel(deliveryDate) : etaDateLabel()}</div>
+                      <div>{selectedDeliverySlot ? `Delivery window: ${selectedDeliverySlot.label}` : "Estimated delivery"}</div>
                     </div>
                     <div className="mt-4">
                       <div><span className="font-bold">Partner:</span> {session?.partnerLabel} fulfilment</div>

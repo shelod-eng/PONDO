@@ -1,0 +1,69 @@
+<svg width="1400" height="780" viewBox="0 0 1400 780" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1400" height="780" fill="#FAF6EE"/>
+  <g opacity="0.2" stroke="#14326A" stroke-width="1">
+    <path d="M0 65H1400"/><path d="M0 130H1400"/><path d="M0 195H1400"/><path d="M0 260H1400"/><path d="M0 325H1400"/><path d="M0 390H1400"/><path d="M0 455H1400"/><path d="M0 520H1400"/><path d="M0 585H1400"/><path d="M0 650H1400"/><path d="M0 715H1400"/>
+    <path d="M100 0V780"/><path d="M200 0V780"/><path d="M300 0V780"/><path d="M400 0V780"/><path d="M500 0V780"/><path d="M600 0V780"/><path d="M700 0V780"/><path d="M800 0V780"/><path d="M900 0V780"/><path d="M1000 0V780"/><path d="M1100 0V780"/><path d="M1200 0V780"/><path d="M1300 0V780"/>
+  </g>
+  <text x="56" y="78" fill="#102A5C" font-family="Arial, Helvetica, sans-serif" font-size="56" font-weight="800">Securing the Payment</text>
+  <text x="56" y="144" fill="#102A5C" font-family="Arial, Helvetica, sans-serif" font-size="56" font-weight="800">Enabled Delivery (PED)</text>
+  <text x="56" y="210" fill="#102A5C" font-family="Arial, Helvetica, sans-serif" font-size="56" font-weight="800">experience</text>
+  <rect x="54" y="252" width="378" height="132" fill="#FBF8F2" stroke="#173267" stroke-width="4"/>
+  <rect x="54" y="252" width="26" height="132" fill="#FBF8F2" stroke="#173267" stroke-width="4"/>
+  <text x="95" y="307" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700">PED Devices &amp; SoftPOS</text>
+  <text x="95" y="342" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">Utilize Yoco, similar hardware, or</text>
+  <text x="95" y="369" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">SoftPOS integrations on mobile</text>
+  <text x="95" y="396" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">to seamlessly facilitate field deliveries.</text>
+  <rect x="395" y="252" width="26" height="26" fill="#102A5C"/><text x="408" y="271" text-anchor="middle" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700">1</text>
+  <rect x="54" y="552" width="360" height="126" fill="#FBF8F2" stroke="#173267" stroke-width="4"/>
+  <rect x="54" y="552" width="24" height="126" fill="#FBF8F2" stroke="#173267" stroke-width="4"/>
+  <text x="97" y="606" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700">Vetted Custody</text>
+  <text x="97" y="640" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">Maintained by KYC-cleared drivers</text>
+  <text x="97" y="667" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">ensuring physical cash or digital</text>
+  <text x="97" y="694" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">handovers remain secure.</text>
+  <rect x="391" y="552" width="24" height="24" fill="#102A5C"/><text x="403" y="570" text-anchor="middle" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700">2</text>
+  <rect x="1018" y="86" width="314" height="136" fill="#FBF8F2" stroke="#173267" stroke-width="4"/>
+  <rect x="1018" y="86" width="24" height="136" fill="#FBF8F2" stroke="#173267" stroke-width="4"/>
+  <text x="1062" y="138" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700">Vetted Custody</text>
+  <text x="1062" y="173" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">Maintained by KYC-cleared drivers</text>
+  <text x="1062" y="200" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">ensuring physical cash or digital</text>
+  <text x="1062" y="227" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">handovers remain secure.</text>
+  <rect x="1306" y="86" width="24" height="24" fill="#102A5C"/><text x="1318" y="104" text-anchor="middle" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700">2</text>
+  <rect x="1018" y="492" width="334" height="154" fill="#FBF8F2" stroke="#173267" stroke-width="4"/>
+  <rect x="1018" y="492" width="24" height="154" fill="#FBF8F2" stroke="#173267" stroke-width="4"/>
+  <text x="1062" y="548" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700">Centralized</text>
+  <text x="1062" y="579" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700">Return Protocol</text>
+  <text x="1062" y="615" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">PED device is returned to a central</text>
+  <text x="1062" y="642" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">location at the end of the shift to</text>
+  <text x="1062" y="669" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">mitigate field risk and close the</text>
+  <text x="1062" y="696" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">operational loop.</text>
+  <rect x="1327" y="492" width="24" height="24" fill="#102A5C"/><text x="1339" y="510" text-anchor="middle" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700">3</text>
+  <path d="M414 318H615" stroke="#6EA2C8" stroke-width="4"/><path d="M615 318V290H720" stroke="#6EA2C8" stroke-width="4"/>
+  <path d="M954 160H1018" stroke="#173267" stroke-width="4"/><path d="M895 326H955V160" stroke="#173267" stroke-width="4"/><path d="M895 326V570H1018" stroke="#173267" stroke-width="4"/><path d="M415 615H575" stroke="#173267" stroke-width="4"/><path d="M575 615V570H1018" stroke="#173267" stroke-width="4"/>
+  <g transform="translate(552 294)">
+    <path d="M0 122L92 46L206 70L216 164L104 238L0 122Z" stroke="#B87553" stroke-width="4" fill="none"/>
+    <path d="M92 46L104 238" stroke="#B87553" stroke-width="3"/><path d="M206 70L104 238" stroke="#B87553" stroke-width="3"/><path d="M0 122L216 164" stroke="#B87553" stroke-width="3"/>
+    <path d="M28 140L95 72" stroke="#6EA2C8" stroke-width="2"/><path d="M66 148L132 83" stroke="#6EA2C8" stroke-width="2"/><path d="M107 157L168 98" stroke="#6EA2C8" stroke-width="2"/><path d="M145 165L200 112" stroke="#6EA2C8" stroke-width="2"/>
+    <circle cx="122" cy="147" r="6" fill="#173267"/><circle cx="90" cy="116" r="5" fill="#173267"/><circle cx="164" cy="131" r="5" fill="#173267"/>
+  </g>
+  <g transform="translate(758 238)">
+    <rect x="0" y="0" width="140" height="196" rx="18" fill="#FBF8F2" stroke="#173267" stroke-width="4"/>
+    <rect x="19" y="25" width="102" height="122" rx="12" fill="#F5F7FB" stroke="#6EA2C8" stroke-width="3"/>
+    <path d="M70 163C82 163 92 173 92 185C92 197 82 207 70 207C58 207 48 197 48 185C48 173 58 163 70 163Z" stroke="#173267" stroke-width="3"/>
+    <text x="70" y="78" text-anchor="middle" fill="#173267" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700">SoftPOS</text>
+    <path d="M44 110C58 95 82 95 96 110" stroke="#6EA2C8" stroke-width="4" fill="none"/>
+    <path d="M54 124C63 115 77 115 86 124" stroke="#6EA2C8" stroke-width="4" fill="none"/>
+    <path d="M65 138C68 134 72 134 75 138" stroke="#6EA2C8" stroke-width="4" fill="none"/>
+  </g>
+  <path d="M720 292C736 272 758 262 777 258" stroke="#6EA2C8" stroke-width="4" fill="none"/>
+  <path d="M712 336C737 328 757 326 778 327" stroke="#6EA2C8" stroke-width="4" fill="none"/>
+  <path d="M710 382C738 386 760 394 783 410" stroke="#6EA2C8" stroke-width="4" fill="none"/>
+  <path d="M938 250C971 266 989 291 1003 322" stroke="#6EA2C8" stroke-width="4" fill="none"/>
+  <path d="M926 230C964 233 992 244 1021 265" stroke="#6EA2C8" stroke-width="4" fill="none"/>
+  <path d="M954 272C986 289 1006 315 1018 349" stroke="#6EA2C8" stroke-width="4" fill="none"/>
+  <g transform="translate(1138 252)">
+    <rect x="88" y="110" width="82" height="102" stroke="#173267" stroke-width="4"/>
+    <rect x="126" y="74" width="46" height="36" stroke="#B87553" stroke-width="4"/>
+    <path d="M130 74C130 58 143 45 159 45C175 45 188 58 188 74" stroke="#B87553" stroke-width="4" fill="none"/>
+    <path d="M159 110V212" stroke="#173267" stroke-width="4"/><path d="M88 212H170" stroke="#173267" stroke-width="4"/>
+  </g>
+</svg>

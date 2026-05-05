@@ -42,6 +42,8 @@ export type DeliveryDetails = {
   city: string;
   province: string;
   postalCode: string;
+  deliveryDate?: string;
+  deliveryWindow?: string;
 };
 
 export type DemoOrderDetail = { transaction: Transaction; details: unknown; audit: AuditEntry[] };
