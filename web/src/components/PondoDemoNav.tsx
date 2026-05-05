@@ -29,14 +29,13 @@ export function PondoDemoNav() {
   return (
     <div className="sticky top-0 z-20 border-b border-[#314a7d] bg-pondo-navy-900 backdrop-blur">
       <div className="mx-auto flex max-w-[1240px] items-center justify-between px-6 py-3">
-        <Link href="/PondoDemo/shop" className="text-sm font-extrabold tracking-wide text-white">
+        <Link href="/PondoDemo" className="text-sm font-extrabold tracking-wide text-white">
           PONDO <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#f0b082]">Trust Commerce</span>
         </Link>
         <div className="flex items-center gap-2">
+          <NavLink href="/PondoDemo" label="Home" />
           <NavLink href="/PondoDemo/shop" label="Shop" />
           <NavLink href="/PondoDemo/cart" label={`Cart (${cartCount})`} />
-          <NavLink href="/PondoDemo/wallet" label="Wallet" />
-          <NavLink href="/PondoDemo/sponsor" label="Sponsor" />
         </div>
         <div className="flex items-center gap-3">
           {!hydrated ? (
