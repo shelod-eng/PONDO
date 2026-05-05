@@ -13,6 +13,47 @@ type PaymentMethod =
   | "ussd"
   | "evoucher_wallet";
 type SettlementBank = "absa" | "fnb" | "standard_bank";
+type ProductRow = {
+  id: string;
+  brand: string;
+  name: string;
+  category: string | null;
+  price_cents: number;
+  discount_pct: number | null;
+  rating: number | null;
+  stock_quantity: number;
+  merchant_name?: string | null;
+};
+type CategoryRow = {
+  category: string;
+};
+type NotificationRow = {
+  channel: "sms" | "email";
+  destination: string;
+  status: string;
+  sent_at: string | null;
+  message: string;
+};
+type DeliveryStepRow = {
+  step_index: number;
+  title: string;
+  detail: string;
+};
+type SponsorSummaryRow = {
+  status: string;
+  amount_cents: number | null;
+};
+type OtpRequestRow = {
+  id: string;
+  checkout_session_id: string;
+  otp_code: string;
+  expires_at: string | Date | null;
+  session_code: string;
+};
+type DeliveryProcessRow = {
+  id: string;
+  started_at: string | Date | null;
+};
 
 const partnerLabels: Record<PartnerName, string> = {
   amazon: "Amazon SA",
@@ -200,9 +241,9 @@ async function ensureCustomerByEmail(email: string, override?: Record<string, un
   };
 }
 
-async function getProductById(id: string) {
+async function getProductById(id: string): Promise<ProductRow | null> {
   const pool = getPool();
-  const result = await pool.query("select * from products where id = $1 limit 1", [id]);
+  const result = await pool.query<ProductRow>("select * from products where id = $1 limit 1", [id]);
   return result.rows[0] || null;
 }
 
@@ -220,12 +261,12 @@ export async function listProducts(q?: string, category?: string) {
   }
 
   const where = filters.length ? `where ${filters.join(" and ")}` : "";
-  const items = await pool.query(`select * from products ${where} order by created_at asc, name asc`, values);
-  const categories = await pool.query("select distinct category from products where category is not null order by category asc");
-  const itemRows = items.rows as any[];
-  const categoryRows = categories.rows as any[];
+  const items = await pool.query<ProductRow>(`select * from products ${where} order by created_at asc, name asc`, values);
+  const categories = await pool.query<CategoryRow>("select distinct category from products where category is not null order by category asc");
+  const itemRows = items.rows;
+  const categoryRows = categories.rows;
   return {
-    items: itemRows.map((row: any) => ({
+    items: itemRows.map((row) => ({
       id: row.id,
       brand: row.brand,
       name: row.name,
@@ -235,7 +276,7 @@ export async function listProducts(q?: string, category?: string) {
       rating: Number(row.rating || 0),
       stock: row.stock_quantity,
     })),
-    categories: categoryRows.map((row: any) => row.category),
+    categories: categoryRows.map((row) => row.category),
   };
 }
 
@@ -326,7 +367,7 @@ export async function createOtpRequest(sessionId: string, channel: "sms" | "emai
 
 export async function verifyOtpRequest(requestId: string, code: string) {
   const pool = getPool();
-  const result = await pool.query(
+  const result = await pool.query<OtpRequestRow>(
     `select o.id, o.checkout_session_id, o.otp_code, o.expires_at, c.session_code
      from otp_requests o
      left join checkout_sessions c on c.id = o.checkout_session_id
@@ -553,7 +594,7 @@ export async function settleOrder(input: {
   const updatedTx = await pool.query("select * from transactions where id = $1", [input.id]);
   const settlement = await pool.query("select * from payment_settlements where transaction_id = $1 order by created_at desc limit 1", [input.id]);
   const notifications = await pool.query("select * from payment_notifications where transaction_id = $1 order by sent_at asc", [input.id]);
-  const notificationRows = notifications.rows as any[];
+  const notificationRows = notifications.rows as NotificationRow[];
   return {
     transaction: updatedTx.rows[0],
     settlement: {
@@ -564,7 +605,7 @@ export async function settleOrder(input: {
       amountCents: settlement.rows[0].amount_cents,
       currency: settlement.rows[0].currency,
     },
-    notifications: notificationRows.map((row: any) => ({
+    notifications: notificationRows.map((row) => ({
       channel: row.channel,
       destination: row.destination,
       status: row.status,
@@ -594,7 +635,7 @@ export async function getOrder(id: string) {
 
 export async function getDeliveryProcess(id: string) {
   const pool = getPool();
-  const processResult = await pool.query("select * from delivery_processes where transaction_id = $1 limit 1", [id]);
+  const processResult = await pool.query<DeliveryProcessRow>("select * from delivery_processes where transaction_id = $1 limit 1", [id]);
   const process = processResult.rows[0];
   if (!process) return null;
   const stepsResult = await pool.query("select * from delivery_process_steps where delivery_process_id = $1 order by step_index asc", [process.id]);
@@ -607,8 +648,8 @@ export async function getDeliveryProcess(id: string) {
   const activeStep = completed ? null : Math.min(totalSteps, Math.floor(elapsedMs / stepDurationMs) + 1);
   const progressPct = Math.max(0, Math.min(100, Math.round((elapsedMs / maxDurationMs) * 100)));
 
-  const stepRows = stepsResult.rows as any[];
-  const steps = stepRows.map((row: any, index: number) => {
+  const stepRows = stepsResult.rows as DeliveryStepRow[];
+  const steps = stepRows.map((row, index: number) => {
     const stepStart = startedAtMs + index * stepDurationMs;
     const stepEnd = stepStart + stepDurationMs;
     const done = Date.now() >= stepEnd;
@@ -636,13 +677,13 @@ export async function getDeliveryProcess(id: string) {
 export async function sponsorSummary() {
   const pool = getPool();
   const result = await pool.query("select status, amount_cents from transactions");
-  const items = result.rows as any[];
+  const items = result.rows as SponsorSummaryRow[];
   return {
     live: items.length,
-    completed: items.filter((row: any) => row.status === "reconciled").length,
-    failed: items.filter((row: any) => row.status === "failed").length,
-    processing: items.filter((row: any) => row.status === "processing" || row.status === "initiated").length,
-    grossCents: items.filter((row: any) => row.status === "reconciled").reduce((sum: number, row: any) => sum + Number(row.amount_cents || 0), 0),
+    completed: items.filter((row) => row.status === "reconciled").length,
+    failed: items.filter((row) => row.status === "failed").length,
+    processing: items.filter((row) => row.status === "processing" || row.status === "initiated").length,
+    grossCents: items.filter((row) => row.status === "reconciled").reduce((sum: number, row) => sum + Number(row.amount_cents || 0), 0),
   };
 }
 

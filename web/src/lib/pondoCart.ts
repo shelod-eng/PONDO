@@ -58,9 +58,13 @@ export function usePondoCart() {
     setItems((prev) => prev.filter((i) => i.productId !== productId));
   }, []);
 
+  const replace = useCallback((nextItems: CartItem[]) => {
+    setItems(nextItems.filter((i) => i.productId && i.qty > 0));
+  }, []);
+
   const clear = useCallback(() => setItems([]), []);
 
   const count = useMemo(() => items.reduce((sum, i) => sum + i.qty, 0), [items]);
 
-  return { items, add, setQty, remove, clear, count, hydrated };
+  return { items, add, setQty, remove, replace, clear, count, hydrated };
 }

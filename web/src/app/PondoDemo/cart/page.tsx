@@ -17,15 +17,14 @@ function discountedPrice(p: DemoProduct) {
 
 export default function CartPage() {
   const cart = usePondoCart();
+  const { add, clear, hydrated, items, remove, replace, setQty } = cart;
   const [products, setProducts] = useState<DemoProduct[]>([]);
-  const [error, setError] = useState("");
 
   useEffect(() => {
     fetchDemoProducts()
       .then((out) => setProducts(out.items))
-      .catch((e) => {
+      .catch(() => {
         setProducts(FALLBACK_PRODUCTS);
-        setError(e instanceof Error ? e.message : "load_failed");
       });
   }, []);
 
@@ -38,7 +37,7 @@ export default function CartPage() {
   }, [products]);
 
   const lines = useMemo(() => {
-    return cart.items
+    return items
       .map((i) => {
         const p = byId.get(i.productId);
         if (!p) return null;
@@ -46,7 +45,15 @@ export default function CartPage() {
         return { item: i, product: p, unitCents: unit, lineCents: unit * i.qty };
       })
       .filter(Boolean) as Array<{ item: { productId: string; qty: number }; product: DemoProduct; unitCents: number; lineCents: number }>;
-  }, [byId, cart.items]);
+  }, [byId, items]);
+
+  useEffect(() => {
+    if (!hydrated || byId.size === 0) return;
+    const validItems = items.filter((item) => byId.has(item.productId));
+    if (validItems.length !== items.length) {
+      replace(validItems);
+    }
+  }, [byId, hydrated, items, replace]);
 
   const subtotal = useMemo(() => lines.reduce((sum, l) => sum + l.lineCents, 0), [lines]);
   const deliveryCents = subtotal > 150000 ? 0 : lines.length ? 5990 : 0;
@@ -71,8 +78,6 @@ export default function CartPage() {
             Checkout
           </Link>
         </div>
-
-        {error ? <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">API unstable, cart is running in sandbox mode.</div> : null}
 
         <div className="mt-6 grid gap-4 lg:grid-cols-[2fr_1fr]">
           <section className="rounded-2xl border border-pondo-line bg-white p-5 shadow-sm">
@@ -99,14 +104,14 @@ export default function CartPage() {
                       </div>
 
                       <div className="flex items-center rounded-lg border border-pondo-line bg-white">
-                        <button onClick={() => cart.setQty(l.item.productId, Math.max(1, l.item.qty - 1))} className="px-3 py-2 text-sm font-bold text-pondo-navy-800">-</button>
+                        <button onClick={() => setQty(l.item.productId, Math.max(1, l.item.qty - 1))} className="px-3 py-2 text-sm font-bold text-pondo-navy-800">-</button>
                         <div className="min-w-10 px-2 text-center text-sm font-semibold">{l.item.qty}</div>
-                        <button onClick={() => cart.setQty(l.item.productId, l.item.qty + 1)} className="px-3 py-2 text-sm font-bold text-pondo-navy-800">+</button>
+                        <button onClick={() => setQty(l.item.productId, l.item.qty + 1)} className="px-3 py-2 text-sm font-bold text-pondo-navy-800">+</button>
                       </div>
 
                       <div className="text-right">
                         <div className="text-2xl font-black text-pondo-navy-900">{money(l.lineCents)}</div>
-                        <button onClick={() => cart.remove(l.item.productId)} className="mt-2 rounded-lg border border-pondo-line bg-white px-3 py-1.5 text-xs font-semibold text-pondo-navy-800 hover:bg-[#e9f0ff]">
+                        <button onClick={() => remove(l.item.productId)} className="mt-2 rounded-lg border border-pondo-line bg-white px-3 py-1.5 text-xs font-semibold text-pondo-navy-800 hover:bg-[#e9f0ff]">
                           Remove
                         </button>
                       </div>
@@ -133,7 +138,7 @@ export default function CartPage() {
               <Link href="/PondoDemo/checkout" className="rounded-xl bg-pondo-orange-500 px-4 py-3 text-center text-sm font-bold text-white hover:bg-pondo-orange-400">
                 Proceed to checkout
               </Link>
-              <button onClick={cart.clear} className="rounded-xl border border-pondo-line bg-white px-4 py-2 text-sm font-semibold text-pondo-navy-800 hover:bg-[#eef3ff]">
+              <button onClick={clear} className="rounded-xl border border-pondo-line bg-white px-4 py-2 text-sm font-semibold text-pondo-navy-800 hover:bg-[#eef3ff]">
                 Clear cart
               </button>
             </div>
@@ -149,7 +154,7 @@ export default function CartPage() {
                   <div className="text-sm font-semibold">{p.name}</div>
                   <div className="mt-1 text-xs text-slate-600">{p.brand}</div>
                   <div className="mt-2 text-lg font-black text-pondo-orange-500">{money(discountedPrice(p))}</div>
-                  <button onClick={() => cart.add(p.id, 1)} className="mt-2 rounded-lg bg-pondo-navy-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-pondo-navy-800">
+                  <button onClick={() => add(p.id, 1)} className="mt-2 rounded-lg bg-pondo-navy-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-pondo-navy-800">
                     Add item
                   </button>
                 </div>

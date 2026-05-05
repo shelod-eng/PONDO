@@ -1,8 +1,7 @@
 import { Pool } from "pg";
 
 declare global {
-  // eslint-disable-next-line no-var
-  var __pondoPgPool: any;
+  var __pondoPgPool: Pool | undefined;
 }
 
 function createPool() {
@@ -37,7 +36,7 @@ function createPool() {
   });
 }
 
-export function getPool(): any {
+export function getPool(): Pool {
   if (!globalThis.__pondoPgPool) {
     globalThis.__pondoPgPool = createPool();
   }
