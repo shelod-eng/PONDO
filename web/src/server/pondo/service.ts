@@ -376,7 +376,7 @@ export async function createOrder(input: {
   actor: string;
   customerEmail: string;
   items: Array<{ productId: string; qty: number }>;
-  delivery: { fullName: string; phone: string; address1: string; city: string; province: string; postalCode: string };
+  delivery: { fullName: string; phone: string; address1: string; city: string; province: string; postalCode: string; deliveryDate?: string; deliveryWindow?: string };
   paymentMethod: PaymentMethod;
 }) {
   const pool = getPool();
@@ -415,7 +415,7 @@ export async function createOrder(input: {
   await pool.query(
     `insert into orders
       (id, order_number, customer_id, partner_code, delivery_snapshot, subtotal_cents, delivery_cents, total_cents, currency, status)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,'ZAR','created')`,
+     values ($1,$2,$3,$4,$5,$6,$7,$8,'ZAR','awaiting_payment')`,
     [
       orderId,
       orderNumber,
@@ -448,7 +448,7 @@ export async function createOrder(input: {
   await pool.query(
     `insert into transactions
       (id, order_id, external_ref, customer_id, amount_cents, currency, payment_method, gateway, gateway_status, credit_tier, qr_payload, status)
-     values ($1,$2,$3,$4,$5,'ZAR',$6,$7,'initiated',null,$8,'initiated')`,
+     values ($1,$2,$3,$4,$5,'ZAR',$6,$7,'Awaiting_Payment',null,$8,'Awaiting_Payment')`,
     [transactionId, orderId, null, customer.email, subtotal, input.paymentMethod, paymentMethodMeta[input.paymentMethod].gateway, qrPayload],
   );
 
@@ -468,6 +468,22 @@ export async function createOrder(input: {
           postalCode: resolvedDelivery.postalCode,
         },
         paymentMethod: input.paymentMethod,
+      }),
+    ],
+  );
+
+  await pool.query(
+    `insert into audit_entries (transaction_id, order_id, actor, action, data)
+     values ($1,$2,$3,'payment.awaiting',$4)`,
+    [
+      transactionId,
+      orderId,
+      input.actor,
+      JSON.stringify({
+        gateway: paymentMethodMeta[input.paymentMethod].gateway,
+        gatewayStatus: "Awaiting_Payment",
+        status: "Awaiting_Payment",
+        note: "Settlement will occur after PED payment is completed at delivery.",
       }),
     ],
   );
@@ -503,6 +519,8 @@ export async function settleOrder(input: {
      where id = $1`,
     [input.id, input.paymentMethod, gateway, `live_${String(input.id).slice(0, 8)}`],
   );
+
+  await pool.query("update orders set status = 'reconciled', updated_at = now() where id = $1", [tx.order_id]);
 
   const safeBank = bankAccounts[input.settlementBank || "absa"] ? (input.settlementBank || "absa") : "absa";
   const bank = bankAccounts[safeBank];
@@ -641,7 +659,7 @@ export async function sponsorSummary() {
     live: items.length,
     completed: items.filter((row: any) => row.status === "reconciled").length,
     failed: items.filter((row: any) => row.status === "failed").length,
-    processing: items.filter((row: any) => row.status === "processing" || row.status === "initiated").length,
+    processing: items.filter((row: any) => ["processing", "initiated", "Awaiting_Payment"].includes(String(row.status))).length,
     grossCents: items.filter((row: any) => row.status === "reconciled").reduce((sum: number, row: any) => sum + Number(row.amount_cents || 0), 0),
   };
 }

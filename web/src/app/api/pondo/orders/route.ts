@@ -15,6 +15,8 @@ const schema = z.object({
     city: z.string().trim().optional().default(""),
     province: z.string().trim().optional().default(""),
     postalCode: z.string().trim().optional().default(""),
+    deliveryDate: z.string().trim().optional(),
+    deliveryWindow: z.string().trim().optional(),
   }),
   paymentMethod: z.enum(["card", "card_3ds", "debit_card", "eft", "payfast", "bnpl", "speedpoint", "ussd", "evoucher_wallet"]),
 });

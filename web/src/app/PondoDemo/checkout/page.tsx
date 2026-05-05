@@ -10,7 +10,6 @@ import {
   fetchPartnerCart,
   getPlaceAddress,
   login,
-  payDemoOrder,
   sendOtp,
   simulateDemoCredit,
   type AddressSuggestion,
@@ -19,6 +18,7 @@ import {
   type PaymentSettlement,
   type PartnerBootstrapSession,
   type PartnerName,
+  type Transaction,
   type GoogleResolvedAddress,
   validateCheckoutAddress,
   verifyOtp,
@@ -250,6 +250,7 @@ export default function PondoCheckoutPage() {
 
   const [vetResult, setVetResult] = useState<VetResult | null>(null);
   const [paymentSettlement, setPaymentSettlement] = useState<PaymentSettlement | null>(null);
+  const [completedTransaction, setCompletedTransaction] = useState<Transaction | null>(null);
   const [completedOrderId, setCompletedOrderId] = useState("");
   const [catalog, setCatalog] = useState<DemoProduct[]>(FALLBACK_PRODUCTS);
   const [, setApiLogs] = useState<string[]>(["Awaiting transaction initiation..."]);
@@ -414,6 +415,7 @@ export default function PondoCheckoutPage() {
       setTermsAccepted(false);
       setVetResult(null);
       setPaymentSettlement(null);
+      setCompletedTransaction(null);
       setCompletedOrderId("");
       setDeliveryDate("");
       setDeliveryWindow("");
@@ -598,7 +600,7 @@ export default function PondoCheckoutPage() {
     if (!session || !customer || !cartLines.length) throw new Error("checkout_incomplete");
 
     const submitWithToken = async (authToken: string) => {
-      const order = await createDemoOrder(authToken, {
+      return createDemoOrder(authToken, {
         customerId: capturedEmail,
         items: cartLines.map((line) => ({ productId: line.product.id, qty: line.qty })),
         delivery: {
@@ -613,14 +615,6 @@ export default function PondoCheckoutPage() {
         },
         paymentMethod: selectedPaymentMethod,
       });
-
-      const pay = await payDemoOrder(authToken, order.transaction.id, selectedPaymentMethod, {
-        settlementBank: "absa",
-        notifyEmail: capturedEmail,
-        notifyChannels: ["sms", "email"],
-      });
-
-      return { order, pay };
     };
 
     let authToken = await ensureCustomerAuth(true, capturedEmail || customer.email);
@@ -635,14 +629,15 @@ export default function PondoCheckoutPage() {
       submitted = await submitWithToken(authToken);
     }
 
-    setCompletedOrderId(submitted.order.transaction.id);
-    setPaymentSettlement(submitted.pay.settlement);
-    log(`Transaction cleared: ${submitted.order.transaction.id}`);
-    log(`Payment method confirmed: ${paymentMethodLabel(selectedPaymentMethod)}`);
-    log(`Funds settled to PONDO ${submitted.pay.settlement.bankLabel} (${submitted.pay.settlement.accountRef})`);
-    log("Order, settlement, and delivery process records were written to the Supabase-backed database.");
+    setCompletedOrderId(submitted.transaction.id);
+    setCompletedTransaction(submitted.transaction);
+    setPaymentSettlement(null);
+    log(`Transaction created: ${submitted.transaction.id}`);
+    log(`Payment method prepared: ${paymentMethodLabel(selectedPaymentMethod)}`);
+    log("Order has been written to Supabase and is awaiting PED payment at delivery.");
+    log("gateway_status and status are set to Awaiting_Payment until driver-side collection completes.");
     log(`Order submitted using ${cartLines.length} cart item(s)`);
-    log(`Webhook posted to ${session.partnerLabel} for ${paymentMethodLabel(selectedPaymentMethod)}`);
+    log(`Checkout verification completed for ${session.partnerLabel}.`);
   }
 
   async function onVerifyOtp() {
@@ -665,7 +660,7 @@ export default function PondoCheckoutPage() {
         throw new Error("Customer did not pass the required background checks.");
       }
 
-      setProcessingMessage("Checks passed. Writing the order and settlement to Supabase...");
+      setProcessingMessage("Checks passed. Writing the order to Supabase and marking it as awaiting PED payment...");
       await completeApprovedPurchase();
       setProcessingMessage("");
       setStep(4);
@@ -966,9 +961,9 @@ export default function PondoCheckoutPage() {
                     {demoOtp ? <div className="text-xs font-semibold text-emerald-700">Demo OTP: {demoOtp}</div> : null}
                   </div>
 
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-3">
                     <input value={otpInput} onChange={(e) => setOtpInput(e.target.value)} placeholder="Enter OTP" className="w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-slate-800" />
-                    <button onClick={onVerifyOtp} disabled={busy || !otpRequestId || !otpInput.trim()} className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60">
+                    <button onClick={onVerifyOtp} disabled={busy || !otpRequestId || !otpInput.trim()} className="mt-3 rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60">
                       {busy ? "Verifying..." : "Verify OTP"}
                     </button>
                   </div>
@@ -996,7 +991,7 @@ export default function PondoCheckoutPage() {
                     <div>
                       <h2 className="text-2xl font-extrabold text-emerald-950">Order received, thanks!</h2>
                       <p className="text-sm text-slate-700">
-                        Confirmation has been sent to {capturedEmail} and SMS confirmation has been sent to {capturedPhone}.
+                        Confirmation has been sent to {capturedEmail} and SMS confirmation has been sent to {capturedPhone}. Payment will be collected on delivery using the PED device.
                       </p>
                     </div>
                   </div>
@@ -1010,11 +1005,13 @@ export default function PondoCheckoutPage() {
                     <div className="mt-4">
                       <div><span className="font-bold">Partner:</span> {session?.partnerLabel} fulfilment</div>
                       <div><span className="font-bold">Items:</span> {cartCount} item totalling {money(cartSubtotalCents)}</div>
+                      <div><span className="font-bold">gateway_status:</span> {completedTransaction?.gateway_status || "Awaiting_Payment"}</div>
+                      <div><span className="font-bold">status:</span> {completedTransaction?.status || "Awaiting_Payment"}</div>
                     </div>
                   </div>
 
                   <div className="mt-5 rounded-xl border border-pondo-line bg-[#f7faff] px-4 py-3 text-sm text-slate-700">
-                    Email and SMS notifications include the order summary, delivery address, estimated fulfilment date, and the PONDO verification outcome.
+                    Email and SMS notifications include the order summary, delivery address, estimated fulfilment date, and the PONDO verification outcome. Settlement and reconciliation will only update after PED payment is completed at the customer doorstep.
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-3">
@@ -1079,10 +1076,16 @@ export default function PondoCheckoutPage() {
                 )}
               </div>
               <div className="mt-3 text-3xl font-extrabold text-pondo-orange-500">{money(cartSubtotalCents)}</div>
-              {step === 4 && paymentSettlement ? (
-                <div className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                  Supabase settlement recorded to {paymentSettlement.bankLabel} using {selectedPaymentMethodMeta.label}.
-                </div>
+              {step === 4 ? (
+                paymentSettlement ? (
+                  <div className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                    Supabase settlement recorded to {paymentSettlement.bankLabel} using {selectedPaymentMethodMeta.label}.
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    Payment is currently awaiting PED collection. `gateway_status`, `status`, `reconciled_at`, and `settled_at` will update after doorstep payment is completed.
+                  </div>
+                )
               ) : null}
             </div>
           </aside>
