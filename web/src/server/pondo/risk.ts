@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { deriveSouthAfricanIdRisk } from "@/lib/validateSAID";
 
 export type ClientGeo = {
   ip?: string;
@@ -50,8 +51,18 @@ export type RiskAssessment = {
     highValue: boolean;
     fingerprintPresent: boolean;
     nonSouthAfricanIp: boolean;
+    underAge: boolean;
   };
   mismatchIsNormal: boolean;
+  identityRisk: {
+    birthDate: string | null;
+    age: number | null;
+    gender: "male" | "female" | null;
+    ageScore: number;
+    genderScore: number;
+    totalScore: number;
+    homeAffairsValidated: boolean;
+  };
   verifiedStatus: string;
 };
 
@@ -228,12 +239,36 @@ export function assessGeoRisk(input: {
   };
   amountCents: number;
   deviceFingerprint?: string;
+  idNumber?: string;
   otpVerified?: boolean;
   saidVerified?: boolean;
 }) {
   let score = 0;
   const factors: string[] = [];
   const notes: string[] = [];
+  const identityRisk = deriveSouthAfricanIdRisk(input.idNumber || "");
+
+  if (input.idNumber && !identityRisk) {
+    throw new Error("invalid_south_african_id");
+  }
+  if (identityRisk?.rejected) {
+    throw new Error("underage_customer");
+  }
+
+  if (identityRisk) {
+    score += identityRisk.ageScore;
+    factors.push(`Age score +${identityRisk.ageScore} (${identityRisk.age} years old)`);
+    notes.push(`Age was derived from the South African ID number as ${identityRisk.age} years old.`);
+
+    if (identityRisk.genderScore > 0) {
+      score += identityRisk.genderScore;
+      factors.push(`Gender score +${identityRisk.genderScore} (${identityRisk.gender})`);
+      notes.push("Gender was derived from the South African ID number and contributed to the composite risk score.");
+    } else {
+      factors.push(`Gender score +0 (${identityRisk.gender})`);
+      notes.push("Gender was derived from the South African ID number with no additional uplift applied.");
+    }
+  }
 
   const normalizedIpCity = normalizeText(input.ipGeo.city);
   const normalizedIpProvince = normalizeProvince(input.ipGeo.province);
@@ -339,8 +374,18 @@ export function assessGeoRisk(input: {
       highValue,
       fingerprintPresent,
       nonSouthAfricanIp,
+      underAge: false,
     },
     mismatchIsNormal: ipMismatch,
+    identityRisk: {
+      birthDate: identityRisk?.birthDate || null,
+      age: identityRisk?.age ?? null,
+      gender: identityRisk?.gender || null,
+      ageScore: identityRisk?.ageScore || 0,
+      genderScore: identityRisk?.genderScore || 0,
+      totalScore: identityRisk?.totalScore || 0,
+      homeAffairsValidated: Boolean(input.saidVerified && identityRisk),
+    },
     verifiedStatus,
   } satisfies RiskAssessment;
 }

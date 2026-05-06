@@ -21,6 +21,7 @@ const schema = z.object({
   }),
   paymentMethod: z.enum(["card", "card_3ds", "debit_card", "eft", "payfast", "bnpl", "speedpoint", "ussd", "evoucher_wallet"]),
   riskContext: z.object({
+    idNumber: z.string().trim().optional(),
     deviceFingerprint: z.string().trim().optional(),
     clientGeo: z.object({
       ip: z.string().trim().optional(),

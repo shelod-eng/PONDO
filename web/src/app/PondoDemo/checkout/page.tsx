@@ -30,7 +30,7 @@ import { fetchGeoLocation, type GeoLocation } from "@/lib/geolocation";
 import { useAuth } from "@/lib/auth";
 import { usePondoCart } from "@/lib/pondoCart";
 import { FALLBACK_IMAGE, FALLBACK_PRODUCTS, IMAGE_BY_PRODUCT } from "@/lib/demoCatalog";
-import { validateSAID } from "@/lib/validateSAID";
+import { deriveSouthAfricanIdRisk, parseSouthAfricanId, validateSAID } from "@/lib/validateSAID";
 
 const partnerOptions: Array<{ id: PartnerName; label: string }> = [
   { id: "amazon", label: "Amazon" },
@@ -66,39 +66,39 @@ type VetResult = {
 const DEMO_CUSTOMER_PROFILES: DemoCustomerProfile[] = [
   {
     email: "thabo@email.com",
-    label: "thabo@email.com (Thabo Nkosi - Male Profile: High Risk Checks)",
+    label: "thabo@email.com (Thabo Nkosi)",
     screeningMode: "full",
-    note: "Male profile requires KYC, credit, affordability, fraud, and geolocation review.",
+    note: "Existing profile loaded. Final verification path now comes from South African ID, age, sex, and geo-risk scoring.",
   },
   {
     email: "sipho@email.com",
-    label: "sipho@email.com (Sipho Molefe - Male Profile: High Risk Checks)",
+    label: "sipho@email.com (Sipho Molefe)",
     screeningMode: "full",
-    note: "Male profile requires KYC, credit, affordability, fraud, and geolocation review.",
+    note: "Existing profile loaded. Final verification path now comes from South African ID, age, sex, and geo-risk scoring.",
   },
   {
     email: "mandla@email.com",
-    label: "mandla@email.com (Mandla Khumalo - Male Profile: High Risk Checks)",
+    label: "mandla@email.com (Mandla Khumalo)",
     screeningMode: "full",
-    note: "Male profile requires KYC, credit, affordability, fraud, and geolocation review.",
+    note: "Existing profile loaded. Final verification path now comes from South African ID, age, sex, and geo-risk scoring.",
   },
   {
     email: "amara@email.com",
-    label: "amara@email.com (Amara Naidoo - Female Profile: No Background Checks)",
+    label: "amara@email.com (Amara Naidoo)",
     screeningMode: "skip",
-    note: "Female profile is configured for direct progression after OTP verification.",
+    note: "Existing profile loaded. Final verification path now comes from South African ID, age, sex, and geo-risk scoring.",
   },
   {
     email: "naledi@email.com",
-    label: "naledi@email.com (Naledi Dlamini - Female Profile: No Background Checks)",
+    label: "naledi@email.com (Naledi Dlamini)",
     screeningMode: "skip",
-    note: "Female profile is configured for direct progression after OTP verification.",
+    note: "Existing profile loaded. Final verification path now comes from South African ID, age, sex, and geo-risk scoring.",
   },
   {
     email: "gogo@email.com",
-    label: "gogo@email.com (Gogo Mokoena - Elderly Citizen: No Background Checks)",
+    label: "gogo@email.com (Gogo Mokoena)",
     screeningMode: "skip",
-    note: "Elderly citizen profile is configured for direct progression after OTP verification.",
+    note: "Existing profile loaded. Final verification path now comes from South African ID, age, sex, and geo-risk scoring.",
   },
 ];
 
@@ -156,8 +156,11 @@ function computeProjectedRisk(input: {
   province: string;
   amountCents: number;
   deviceFingerprint: string;
+  idNumber: string;
 }) {
   let score = 0;
+  const idRisk = deriveSouthAfricanIdRisk(input.idNumber);
+  const geoFactors: string[] = [];
   const ipProvince = normalizeRiskProvince(input.clientGeo?.province);
   const ipCity = normalizeRiskText(input.clientGeo?.city);
   const deliveryProvince = normalizeRiskProvince(input.province);
@@ -165,21 +168,42 @@ function computeProjectedRisk(input: {
   const provinceMatches = ipProvince && deliveryProvince && ipProvince === deliveryProvince;
   const cityMatches = ipCity && deliveryCity && ipCity === deliveryCity;
   const ipMismatch = Boolean((ipProvince || ipCity) && (deliveryProvince || deliveryCity) && !provinceMatches && !cityMatches);
-  if (ipMismatch) score += 40;
+  if (idRisk && !idRisk.rejected) {
+    score += idRisk.ageScore + idRisk.genderScore;
+  }
+  if (ipMismatch) {
+    score += 40;
+    geoFactors.push("IP mismatch +40");
+  }
   const highRiskZone = CHECKOUT_HIGH_RISK_ZONES.has(`${deliveryCity}|${deliveryProvince}`);
-  if (highRiskZone) score += 30;
+  if (highRiskZone) {
+    score += 30;
+    geoFactors.push("High-risk zone +30");
+  }
   const highValue = input.amountCents > 1_000_000;
-  if (highValue) score += 20;
+  if (highValue) {
+    score += 20;
+    geoFactors.push("High-value order +20");
+  }
   const fingerprintPresent = Boolean(input.deviceFingerprint);
-  if (!fingerprintPresent) score += 10;
+  if (!fingerprintPresent) {
+    score += 10;
+    geoFactors.push("Missing device fingerprint +10");
+  }
   const nonSouthAfricanIp = Boolean(input.clientGeo?.country) && normalizeRiskText(input.clientGeo?.country) !== "south africa";
-  if (nonSouthAfricanIp) score += 25;
+  if (nonSouthAfricanIp) {
+    score += 25;
+    geoFactors.push("Non-SA IP +25");
+  }
 
   return {
     score,
     ipMismatch,
     highRiskZone,
     highValue,
+    nonSouthAfricanIp,
+    idRisk,
+    geoFactors,
     decision: score > 70 ? "manual_review_hold" : score >= 41 ? "elevated_verification" : "auto_approve",
   } as const;
 }
@@ -468,6 +492,9 @@ export default function PondoCheckoutPage() {
     () => cartLines.reduce((sum, line) => sum + line.lineCents, 0),
     [cartLines],
   );
+  const normalizedIdNumber = capturedIdNumber.replace(/\D/g, "");
+  const saidDetails = useMemo(() => parseSouthAfricanId(normalizedIdNumber), [normalizedIdNumber]);
+  const saidRisk = useMemo(() => deriveSouthAfricanIdRisk(normalizedIdNumber), [normalizedIdNumber]);
   const projectedRisk = useMemo(
     () =>
       computeProjectedRisk({
@@ -476,14 +503,15 @@ export default function PondoCheckoutPage() {
         province: addressValidation?.province || capturedProvince,
         amountCents: cartSubtotalCents,
         deviceFingerprint,
+        idNumber: normalizedIdNumber,
       }),
-    [addressValidation?.city, addressValidation?.province, capturedCity, capturedProvince, cartSubtotalCents, clientGeo, deviceFingerprint],
+    [addressValidation?.city, addressValidation?.province, capturedCity, capturedProvince, cartSubtotalCents, clientGeo, deviceFingerprint, normalizedIdNumber],
   );
   const requiresEnhancedRiskChecks = projectedRisk.decision !== "auto_approve";
-  const requiresKycPipelineView = selectedProfile.screeningMode === "full" || projectedRisk.decision !== "auto_approve";
-  const normalizedIdNumber = capturedIdNumber.replace(/\D/g, "");
+  const requiresKycPipelineView = projectedRisk.decision !== "auto_approve";
   const isSaidComplete = normalizedIdNumber.length === 13;
   const isSaidValid = isSaidComplete && validateSAID(normalizedIdNumber);
+  const isUnderAge = Boolean(saidRisk?.rejected);
   const showSaidFeedback = saidBlurred;
 
   const primaryCtaClass =
@@ -607,6 +635,10 @@ export default function PondoCheckoutPage() {
       setSaidBlurred(true);
       throw new Error("Enter a valid 13-digit South African ID number before requesting OTP.");
     }
+    if (isUnderAge) {
+      setSaidBlurred(true);
+      throw new Error("Customers under 18 cannot place orders on the PONDO platform.");
+    }
 
     const out = await sendOtp({
       sessionId: session.sessionId,
@@ -624,6 +656,11 @@ export default function PondoCheckoutPage() {
     if (!isSaidValid) {
       setSaidBlurred(true);
       setError("Please enter a valid South African ID number before proceeding.");
+      return;
+    }
+    if (isUnderAge) {
+      setSaidBlurred(true);
+      setError("Customers under 18 cannot place orders on the PONDO platform.");
       return;
     }
     if (!deliveryDate) {
@@ -660,7 +697,7 @@ export default function PondoCheckoutPage() {
   async function runScreeningJourney() {
     if (!customer) return null;
 
-    if (selectedProfile.screeningMode === "skip" && projectedRisk.decision === "auto_approve") {
+    if (projectedRisk.decision === "auto_approve") {
       const autoApproved: VetResult = {
         transunionScore: 0,
         transunionApproved: true,
@@ -671,7 +708,7 @@ export default function PondoCheckoutPage() {
         screeningMode: "skip",
       };
       setVetResult(autoApproved);
-      log("OTP accepted - trusted profile progressed without manual background checks.");
+      log("Composite risk remained inside the auto-approve band after SA ID and geo checks.");
       return autoApproved;
     }
 
@@ -698,10 +735,11 @@ export default function PondoCheckoutPage() {
     log(`TransUnion ITC score: ${transunionScore} (${transunionApproved ? "approved" : "declined"})`);
     log(`Experian affordability: income ${new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR", maximumFractionDigits: 0 }).format(experianIncome)}/mo`);
     log(`Geo-location reviewed: ${capturedCity}, ${capturedProvince}`);
-    log(`Python fraud score: ${fraudScore.toFixed(2)} (${fraudScore <= 0.08 ? "low risk" : "high risk"})`);
-    if (projectedRisk.decision !== "auto_approve") {
-      log(`Geo-risk band ${projectedRisk.score} triggered ${riskDecisionLabel(projectedRisk.decision).toLowerCase()}.`);
+    if (saidRisk) {
+      log(`SA ID derived age ${saidRisk.age} (+${saidRisk.ageScore}) and sex ${saidRisk.gender} (+${saidRisk.genderScore}).`);
     }
+    log(`Python fraud score: ${fraudScore.toFixed(2)} (${fraudScore <= 0.08 ? "low risk" : "high risk"})`);
+    log(`Composite risk score ${projectedRisk.score} triggered ${riskDecisionLabel(projectedRisk.decision).toLowerCase()}.`);
     log(approved ? "All checks passed - customer approved for checkout" : "Checks failed - manual review required");
     return result;
   }
@@ -725,6 +763,7 @@ export default function PondoCheckoutPage() {
         },
         paymentMethod: selectedPaymentMethod,
         riskContext: {
+          idNumber: normalizedIdNumber,
           deviceFingerprint,
           clientGeo: clientGeo
             ? {
@@ -788,15 +827,11 @@ export default function PondoCheckoutPage() {
       setOtpVerified(true);
       log("OTP accepted - identity confirmed");
 
-      if (selectedProfile.screeningMode === "full") {
-        setProcessingMessage("Running KYC, credit, affordability, fraud, and geolocation checks...");
-      } else {
-        setProcessingMessage(
-          requiresEnhancedRiskChecks
-            ? "Geo-risk score exceeded the auto-approve band. Running elevated verification checks..."
-            : "Profile is exempt from background checks. Finalizing order confirmation...",
-        );
-      }
+      setProcessingMessage(
+        requiresEnhancedRiskChecks
+          ? "Running composite risk checks using SA ID age, sex, KYC, affordability, fraud, and geolocation..."
+          : "SA ID and geo-risk checks are within the auto-approve band. Finalizing order confirmation...",
+      );
 
       const result = await runScreeningJourney();
       if (!result?.approved) {
@@ -949,7 +984,16 @@ export default function PondoCheckoutPage() {
                     />
                     {showSaidFeedback ? (
                       isSaidValid ? (
-                        <p className="mt-1 text-xs font-semibold text-emerald-700">Valid South African ID number.</p>
+                        <div className="mt-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                          <div className="font-semibold">Home Affairs format validated.</div>
+                          {saidDetails ? (
+                            <div className="mt-1">
+                              DOB: {saidDetails.birthDate} | Age: {saidDetails.age} | Sex: {saidDetails.gender === "male" ? "Male" : "Female"}
+                              {saidRisk ? ` | ID risk: +${saidRisk.totalScore}` : ""}
+                            </div>
+                          ) : null}
+                          {isUnderAge ? <div className="mt-1 font-semibold text-red-700">Customer is under 18 and must be rejected.</div> : null}
+                        </div>
                       ) : (
                         <p className="mt-1 text-xs font-semibold text-red-600">Enter a valid 13-digit South African ID number.</p>
                       )
@@ -1079,6 +1123,47 @@ export default function PondoCheckoutPage() {
                   </div>
                 </div>
 
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-sm font-bold text-pondo-navy-900">Composite Risk Preview</div>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                    <div className="rounded-lg border border-white bg-white px-3 py-3 text-sm text-slate-700">
+                      <div className="font-semibold text-pondo-navy-900">South African ID Inputs</div>
+                      {saidRisk ? (
+                        <div className="mt-2 space-y-1 text-xs">
+                          <div>DOB: {saidRisk.birthDate}</div>
+                          <div>Age: {saidRisk.age} {"=>"} +{saidRisk.ageScore}</div>
+                          <div>Sex: {saidRisk.gender === "male" ? "Male" : "Female"} {"=>"} +{saidRisk.genderScore}</div>
+                          <div>Home Affairs validation: {isSaidValid ? "passed" : "pending"}</div>
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-xs text-slate-500">Enter a valid South African ID number to derive age and sex scoring.</div>
+                      )}
+                    </div>
+                    <div className="rounded-lg border border-white bg-white px-3 py-3 text-sm text-slate-700">
+                      <div className="font-semibold text-pondo-navy-900">Geo-Risk Inputs</div>
+                      <div className="mt-2 space-y-1 text-xs">
+                        <div>IP mismatch: {projectedRisk.ipMismatch ? "+40" : "+0"}</div>
+                        <div>High-risk zone: {projectedRisk.highRiskZone ? "+30" : "+0"}</div>
+                        <div>High order value: {projectedRisk.highValue ? "+20" : "+0"}</div>
+                        <div>Device fingerprint: {deviceFingerprint ? "+0" : "+10"}</div>
+                        <div>External IP country uplift: {projectedRisk.nonSouthAfricanIp ? "+25" : "+0"}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+                    <div className="font-semibold">Projected total: {projectedRisk.score} points - {riskDecisionLabel(projectedRisk.decision)}</div>
+                    <div className="mt-1">
+                      {isUnderAge
+                        ? "Customer is under 18 and the order must be rejected."
+                        : projectedRisk.decision === "manual_review_hold"
+                          ? "This checkout will move into manual review hold after verification checks."
+                          : projectedRisk.decision === "elevated_verification"
+                            ? "This checkout will follow the elevated verification pipeline."
+                            : "This checkout remains in the auto-approve band."}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="rounded-xl border border-pondo-line bg-pondo-surface-soft p-3">
                   <div className="mb-2 text-sm font-bold text-pondo-navy-800">Terms & Conditions - POPIA Compliant</div>
                   <div className="max-h-28 overflow-y-auto rounded bg-white p-2 text-xs text-slate-600">
@@ -1103,11 +1188,9 @@ export default function PondoCheckoutPage() {
                     <h2 className="text-2xl font-extrabold">{requiresKycPipelineView ? "KYC Verification" : "OTP Verification"}</h2>
                     <p className="mt-2 text-sm text-slate-700">
                       We sent a one-time PIN by SMS to <span className="font-bold">{capturedPhone}</span>. Verify the OTP to continue.
-                      {selectedProfile.screeningMode === "full"
-                        ? " This profile continues into the full KYC, credit, affordability, fraud, and geolocation pipeline."
-                        : requiresEnhancedRiskChecks
-                          ? " This order sits above the auto-approve band, so elevated verification checks will run after OTP."
-                          : " This profile will move directly to order confirmation after verification."}
+                      {requiresEnhancedRiskChecks
+                        ? " Composite risk from SA ID age, sex, and geolocation sits above the auto-approve band, so elevated verification checks will run after OTP."
+                        : " SA ID and geolocation scoring are within the auto-approve band, so the order can move directly to confirmation after verification."}
                     </p>
 
                     <div className="mt-5 flex flex-wrap items-center gap-2">
@@ -1194,6 +1277,7 @@ export default function PondoCheckoutPage() {
                       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                         <div className="font-bold">Geo-risk band</div>
                         <div className="mt-1">{projectedRisk.score <= 40 ? "0 - 40 auto-approve" : projectedRisk.score <= 70 ? "41 - 70 elevated verification" : "> 70 manual review hold"}</div>
+                        {saidRisk ? <div className="mt-1 text-xs">SA ID adds +{saidRisk.ageScore} for age and +{saidRisk.genderScore} for sex.</div> : null}
                       </div>
                       <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
                         <div className="font-bold">Mismatch handling</div>
@@ -1255,10 +1339,15 @@ export default function PondoCheckoutPage() {
                   {completedRiskAssessment ? (
                     <div className="mt-4 grid gap-3 lg:grid-cols-2">
                       <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                        <div className="font-bold text-pondo-navy-900">Geo-risk decision</div>
+                        <div className="font-bold text-pondo-navy-900">Composite risk decision</div>
                         <div className="mt-2 text-lg font-black text-pondo-navy-900">{completedRiskAssessment.score} pts - {completedRiskAssessment.decisionLabel}</div>
                         <div className="mt-1">{completedRiskAssessment.bandLabel}</div>
                         <div className="mt-2">{completedRiskAssessment.recommendedPath}</div>
+                        {completedRiskAssessment.identityRisk.age !== null ? (
+                          <div className="mt-2 text-xs text-slate-600">
+                            SA ID derived DOB {completedRiskAssessment.identityRisk.birthDate} | Age {completedRiskAssessment.identityRisk.age} (+{completedRiskAssessment.identityRisk.ageScore}) | Sex {completedRiskAssessment.identityRisk.gender} (+{completedRiskAssessment.identityRisk.genderScore})
+                          </div>
+                        ) : null}
                         <div className="mt-2 text-xs uppercase tracking-[0.08em] text-slate-500">Verification: {completedRiskAssessment.verifiedStatus}</div>
                       </div>
                       <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">

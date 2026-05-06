@@ -397,6 +397,7 @@ export async function createOrder(input: {
   delivery: { fullName: string; phone: string; address1: string; city: string; province: string; postalCode: string; deliveryDate?: string; deliveryWindow?: string };
   paymentMethod: PaymentMethod;
   riskContext?: {
+    idNumber?: string;
     deviceFingerprint?: string;
     clientGeo?: ClientGeo;
     validatedAddress?: ValidatedAddress;
@@ -452,6 +453,7 @@ export async function createOrder(input: {
     deliveryGeo: validatedAddress,
     amountCents: subtotal,
     deviceFingerprint: input.riskContext?.deviceFingerprint,
+    idNumber: input.riskContext?.idNumber,
     otpVerified: input.riskContext?.otpVerified,
     saidVerified: input.riskContext?.saidVerified,
   });

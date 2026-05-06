@@ -82,11 +82,22 @@ export type RiskAssessment = {
     highValue: boolean;
     fingerprintPresent: boolean;
     nonSouthAfricanIp: boolean;
+    underAge: boolean;
   };
   mismatchIsNormal: boolean;
+  identityRisk: {
+    birthDate: string | null;
+    age: number | null;
+    gender: "male" | "female" | null;
+    ageScore: number;
+    genderScore: number;
+    totalScore: number;
+    homeAffairsValidated: boolean;
+  };
   verifiedStatus: string;
 };
 export type OrderRiskContext = {
+  idNumber?: string;
   deviceFingerprint?: string;
   clientGeo?: {
     ip?: string;
