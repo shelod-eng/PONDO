@@ -21,8 +21,12 @@ export type ValidatedAddress = {
 
 export type RiskAssessment = {
   score: number;
-  decision: "auto_approve" | "review" | "manual_review";
+  decision: "auto_approve" | "elevated_verification" | "manual_review_hold";
+  decisionLabel: string;
+  bandLabel: string;
+  recommendedPath: string;
   factors: string[];
+  notes: string[];
   ipAddress: string;
   ipGeo: {
     city: string;
@@ -47,6 +51,7 @@ export type RiskAssessment = {
     fingerprintPresent: boolean;
     nonSouthAfricanIp: boolean;
   };
+  mismatchIsNormal: boolean;
   verifiedStatus: string;
 };
 
@@ -228,6 +233,7 @@ export function assessGeoRisk(input: {
 }) {
   let score = 0;
   const factors: string[] = [];
+  const notes: string[] = [];
 
   const normalizedIpCity = normalizeText(input.ipGeo.city);
   const normalizedIpProvince = normalizeProvince(input.ipGeo.province);
@@ -240,8 +246,10 @@ export function assessGeoRisk(input: {
   if (ipMismatch) {
     score += 40;
     factors.push(`IP mismatch +40 (${input.ipGeo.province || "Unknown"} vs ${input.deliveryGeo.province || "Unknown"})`);
+    notes.push("IP and delivery address do not match. This is treated as elevated risk, not fraud by default.");
   } else {
     factors.push("IP and delivery region aligned +0");
+    notes.push("IP and delivery region align. No mismatch risk points were added.");
   }
 
   const highRiskZone = HIGH_RISK_ZONES.some(
@@ -250,20 +258,24 @@ export function assessGeoRisk(input: {
   if (highRiskZone) {
     score += 30;
     factors.push(`High-risk zone +30 (${input.deliveryGeo.city}, ${input.deliveryGeo.province})`);
+    notes.push("Delivery address falls inside a known higher-risk zone and requires closer fulfilment controls.");
   }
 
   const highValue = input.amountCents > 1_000_000;
   if (highValue) {
     score += 20;
     factors.push(`High-value order +20 (${input.amountCents / 100})`);
+    notes.push("Order value exceeds R10,000, so enhanced geo-risk controls are applied.");
   }
 
   const fingerprintPresent = Boolean(input.deviceFingerprint);
   if (!fingerprintPresent) {
     score += 10;
     factors.push("Missing device fingerprint +10");
+    notes.push("No stable device fingerprint was captured for this session.");
   } else {
     factors.push("Device fingerprint captured +0");
+    notes.push("Device fingerprint captured successfully for session comparison.");
   }
 
   const normalizedCountry = normalizeText(input.ipGeo.country);
@@ -271,15 +283,39 @@ export function assessGeoRisk(input: {
   if (nonSouthAfricanIp) {
     score += 25;
     factors.push(`Non-SA IP +25 (${input.ipGeo.country})`);
+    notes.push("Public IP resolved outside South Africa, which adds additional scrutiny.");
   }
 
-  const decision = score >= 70 ? "manual_review" : score >= 40 ? "review" : "auto_approve";
+  const decision =
+    score > 70 ? "manual_review_hold" : score >= 41 ? "elevated_verification" : "auto_approve";
+  const decisionLabel =
+    decision === "manual_review_hold"
+      ? "Manual Review Hold"
+      : decision === "elevated_verification"
+        ? "Elevated Verification"
+        : "Auto-Approve";
+  const bandLabel =
+    decision === "manual_review_hold"
+      ? "> 70 points"
+      : decision === "elevated_verification"
+        ? "41 - 70 points"
+        : "0 - 40 points";
+  const recommendedPath =
+    decision === "manual_review_hold"
+      ? "Hold order for human review before fulfilment and PED collection."
+      : decision === "elevated_verification"
+        ? "Run elevated verification checks, then allow fulfilment if checks pass."
+        : "OTP-only path may continue automatically to fulfilment scheduling.";
   const verifiedStatus = input.otpVerified && input.saidVerified ? "otp_and_id_verified" : input.otpVerified ? "otp_verified" : "pending";
 
   return {
     score,
     decision,
+    decisionLabel,
+    bandLabel,
+    recommendedPath,
     factors,
+    notes,
     ipAddress: input.ipAddress,
     ipGeo: {
       city: input.ipGeo.city,
@@ -304,6 +340,7 @@ export function assessGeoRisk(input: {
       fingerprintPresent,
       nonSouthAfricanIp,
     },
+    mismatchIsNormal: ipMismatch,
     verifiedStatus,
   } satisfies RiskAssessment;
 }

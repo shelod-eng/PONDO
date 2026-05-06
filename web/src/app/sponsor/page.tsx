@@ -81,7 +81,7 @@ export default function SponsorPage() {
       <TopNav />
       <div className="mx-auto max-w-5xl px-6 py-8">
         <h1 className="text-2xl font-semibold tracking-tight">Sponsor Portal</h1>
-        <p className="mt-2 text-sm text-white/60">Transaction lifecycle dashboard: initiated → processing → reconciled (demo).</p>
+        <p className="mt-2 text-sm text-white/60">Transaction lifecycle dashboard with geo-risk scoring, elevated verification, and manual review holds.</p>
 
         {!auth ? (
           <div className="mt-6 grid gap-4 rounded-2xl border border-white/10 bg-white/5 p-6 sm:grid-cols-3">
@@ -126,6 +126,8 @@ export default function SponsorPage() {
                   <option value="">all</option>
                   <option value="initiated">initiated</option>
                   <option value="processing">processing</option>
+                  <option value="Awaiting_Payment">Awaiting_Payment</option>
+                  <option value="Manual_Review_Hold">Manual_Review_Hold</option>
                   <option value="reconciled">reconciled</option>
                   <option value="failed">failed</option>
                 </select>
@@ -154,6 +156,7 @@ export default function SponsorPage() {
                     <th className="px-4 py-3">Transaction</th>
                     <th className="px-4 py-3">Customer</th>
                     <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Risk</th>
                     <th className="px-4 py-3">Gateway</th>
                     <th className="px-4 py-3">Created</th>
                     <th className="px-4 py-3"></th>
@@ -162,7 +165,7 @@ export default function SponsorPage() {
                 <tbody>
                   {items.length === 0 ? (
                     <tr>
-                      <td className="px-4 py-4 text-white/60" colSpan={6}>
+                      <td className="px-4 py-4 text-white/60" colSpan={7}>
                         No transactions yet.
                       </td>
                     </tr>
@@ -175,6 +178,12 @@ export default function SponsorPage() {
                           <div className="flex flex-wrap items-center gap-2">
                             <Chip>{t.status}</Chip>
                             {t.credit_tier ? <Chip>tier {t.credit_tier}</Chip> : null}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-white/80">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {typeof t.risk_score === "number" ? <Chip>{t.risk_score} pts</Chip> : null}
+                            {t.risk_decision ? <Chip>{t.risk_decision}</Chip> : null}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-white/80">{t.gateway}</td>

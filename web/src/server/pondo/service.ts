@@ -116,6 +116,12 @@ const bankAccounts: Record<SettlementBank, { bankLabel: string; accountRef: stri
   standard_bank: { bankLabel: "Standard Bank Business Account", accountRef: "STD-***-5560" },
 };
 
+function riskLevelFromScore(score: number) {
+  if (score > 70) return "high";
+  if (score >= 41) return "elevated";
+  return "low";
+}
+
 const deliverySteps = [
   { title: "Dispatch Initiation", detail: "Email, WhatsApp, and SMS dispatches confirm that the order is in route." },
   { title: "Active Tracking", detail: "System confirms live dispatch and starts real-time package tracking." },
@@ -449,11 +455,15 @@ export async function createOrder(input: {
     otpVerified: input.riskContext?.otpVerified,
     saidVerified: input.riskContext?.saidVerified,
   });
+  const riskLevel = riskLevelFromScore(riskAssessment.score);
+  const holdForManualReview = riskAssessment.decision === "manual_review_hold";
+  const transactionStatus = holdForManualReview ? "Manual_Review_Hold" : "Awaiting_Payment";
+  const orderStatus = holdForManualReview ? "manual_review_hold" : "awaiting_payment";
 
   await pool.query(
     `insert into orders
       (id, order_number, customer_id, partner_code, delivery_snapshot, subtotal_cents, delivery_cents, total_cents, currency, status)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,'ZAR','awaiting_payment')`,
+     values ($1,$2,$3,$4,$5,$6,$7,$8,'ZAR',$9)`,
     [
       orderId,
       orderNumber,
@@ -470,6 +480,7 @@ export async function createOrder(input: {
       subtotal,
       0,
       subtotal,
+      orderStatus,
     ],
   );
 
@@ -490,8 +501,8 @@ export async function createOrder(input: {
       (id, order_id, external_ref, customer_id, amount_cents, currency, payment_method, gateway, gateway_status, credit_tier, qr_payload, status,
        risk_score, risk_level, risk_decision, risk_factors, ip_address, ip_city, ip_province, ip_country, ip_postal_code, ip_latitude, ip_longitude,
        device_fingerprint, validated_city, validated_province, validated_postal_code, validated_latitude, validated_longitude, verified_status)
-     values ($1,$2,$3,$4,$5,'ZAR',$6,$7,'Awaiting_Payment',null,$8,'Awaiting_Payment',
-       $9,$10,$11,$12::jsonb,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
+     values ($1,$2,$3,$4,$5,'ZAR',$6,$7,$8,null,$9,$10,
+       $11,$12,$13,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)`,
     [
       transactionId,
       orderId,
@@ -500,9 +511,11 @@ export async function createOrder(input: {
       subtotal,
       input.paymentMethod,
       paymentMethodMeta[input.paymentMethod].gateway,
+      transactionStatus,
       qrPayload,
+      transactionStatus,
       riskAssessment.score,
-      riskAssessment.score >= 70 ? "high" : riskAssessment.score >= 40 ? "medium" : "low",
+      riskLevel,
       riskAssessment.decision,
       JSON.stringify(riskAssessment.factors),
       riskAssessment.ipAddress,
@@ -551,9 +564,11 @@ export async function createOrder(input: {
       input.actor,
       JSON.stringify({
         gateway: paymentMethodMeta[input.paymentMethod].gateway,
-        gatewayStatus: "Awaiting_Payment",
-        status: "Awaiting_Payment",
-        note: "Settlement will occur after PED payment is completed at delivery.",
+        gatewayStatus: transactionStatus,
+        status: transactionStatus,
+        note: holdForManualReview
+          ? "Order is held for manual review before PED collection is allowed."
+          : "Settlement will occur after PED payment is completed at delivery.",
       }),
     ],
   );
@@ -580,6 +595,7 @@ export async function settleOrder(input: {
   const txResult = await pool.query("select * from transactions where id = $1 limit 1", [input.id]);
   const tx = txResult.rows[0];
   if (!tx) throw new Error("not_found");
+  if (String(tx.status) === "Manual_Review_Hold") throw new Error("manual_review_required");
 
   const gateway = paymentMethodMeta[input.paymentMethod].gateway;
   const creditEligible = !paymentMethodMeta[input.paymentMethod].requiresCreditVet || ["A", "B"].includes(String(tx.credit_tier || "A"));
@@ -735,7 +751,7 @@ export async function sponsorSummary() {
     live: items.length,
     completed: items.filter((row: any) => row.status === "reconciled").length,
     failed: items.filter((row: any) => row.status === "failed").length,
-    processing: items.filter((row: any) => ["processing", "initiated", "Awaiting_Payment"].includes(String(row.status))).length,
+    processing: items.filter((row: any) => ["processing", "initiated", "Awaiting_Payment", "Manual_Review_Hold"].includes(String(row.status))).length,
     grossCents: items.filter((row: any) => row.status === "reconciled").reduce((sum: number, row: any) => sum + Number(row.amount_cents || 0), 0),
   };
 }

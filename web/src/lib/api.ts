@@ -53,8 +53,12 @@ export type DeliveryDetails = {
 export type DemoOrderDetail = { transaction: Transaction; details: unknown; audit: AuditEntry[] };
 export type RiskAssessment = {
   score: number;
-  decision: "auto_approve" | "review" | "manual_review";
+  decision: "auto_approve" | "elevated_verification" | "manual_review_hold";
+  decisionLabel: string;
+  bandLabel: string;
+  recommendedPath: string;
   factors: string[];
+  notes: string[];
   ipAddress: string;
   ipGeo: {
     city: string;
@@ -79,6 +83,7 @@ export type RiskAssessment = {
     fingerprintPresent: boolean;
     nonSouthAfricanIp: boolean;
   };
+  mismatchIsNormal: boolean;
   verifiedStatus: string;
 };
 export type OrderRiskContext = {

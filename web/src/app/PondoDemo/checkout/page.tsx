@@ -107,6 +107,89 @@ const DELIVERY_TIME_SLOTS = [
   { id: "12:00-15:00", label: "12:00 - 15:00" },
 ] as const;
 
+const CHECKOUT_PROVINCE_ALIASES: Record<string, string> = {
+  gp: "gauteng",
+  gauteng: "gauteng",
+  kzn: "kwazulu-natal",
+  "kwa-zulu natal": "kwazulu-natal",
+  "kwazulu natal": "kwazulu-natal",
+  "kwazulu-natal": "kwazulu-natal",
+  wc: "western cape",
+  "western cape": "western cape",
+  ec: "eastern cape",
+  "eastern cape": "eastern cape",
+  fs: "free state",
+  "free state": "free state",
+  lp: "limpopo",
+  limpopo: "limpopo",
+  mp: "mpumalanga",
+  mpumalanga: "mpumalanga",
+  nc: "northern cape",
+  "northern cape": "northern cape",
+  nw: "north west",
+  "north west": "north west",
+};
+
+const CHECKOUT_HIGH_RISK_ZONES = new Set([
+  "durban|kwazulu-natal",
+  "durban central|kwazulu-natal",
+  "hillbrow|gauteng",
+  "johannesburg cbd|gauteng",
+  "alexandra|gauteng",
+]);
+
+function normalizeRiskText(value: string | undefined) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeRiskProvince(value: string | undefined) {
+  const normalized = normalizeRiskText(value).replace(/\./g, "");
+  return CHECKOUT_PROVINCE_ALIASES[normalized] || normalized;
+}
+
+function computeProjectedRisk(input: {
+  clientGeo: GeoLocation | null;
+  city: string;
+  province: string;
+  amountCents: number;
+  deviceFingerprint: string;
+}) {
+  let score = 0;
+  const ipProvince = normalizeRiskProvince(input.clientGeo?.province);
+  const ipCity = normalizeRiskText(input.clientGeo?.city);
+  const deliveryProvince = normalizeRiskProvince(input.province);
+  const deliveryCity = normalizeRiskText(input.city);
+  const provinceMatches = ipProvince && deliveryProvince && ipProvince === deliveryProvince;
+  const cityMatches = ipCity && deliveryCity && ipCity === deliveryCity;
+  const ipMismatch = Boolean((ipProvince || ipCity) && (deliveryProvince || deliveryCity) && !provinceMatches && !cityMatches);
+  if (ipMismatch) score += 40;
+  const highRiskZone = CHECKOUT_HIGH_RISK_ZONES.has(`${deliveryCity}|${deliveryProvince}`);
+  if (highRiskZone) score += 30;
+  const highValue = input.amountCents > 1_000_000;
+  if (highValue) score += 20;
+  const fingerprintPresent = Boolean(input.deviceFingerprint);
+  if (!fingerprintPresent) score += 10;
+  const nonSouthAfricanIp = Boolean(input.clientGeo?.country) && normalizeRiskText(input.clientGeo?.country) !== "south africa";
+  if (nonSouthAfricanIp) score += 25;
+
+  return {
+    score,
+    ipMismatch,
+    highRiskZone,
+    highValue,
+    decision: score > 70 ? "manual_review_hold" : score >= 41 ? "elevated_verification" : "auto_approve",
+  } as const;
+}
+
+function riskDecisionLabel(decision: RiskAssessment["decision"] | ReturnType<typeof computeProjectedRisk>["decision"]) {
+  if (decision === "manual_review_hold") return "Manual Review Required";
+  if (decision === "elevated_verification") return "Elevated Verification";
+  return "Auto-Approve";
+}
+
 function money(cents: number) {
   return new Intl.NumberFormat("en-ZA", {
     style: "currency",
@@ -255,6 +338,7 @@ export default function PondoCheckoutPage() {
   const [completedTransaction, setCompletedTransaction] = useState<Transaction | null>(null);
   const [completedRiskAssessment, setCompletedRiskAssessment] = useState<RiskAssessment | null>(null);
   const [completedOrderId, setCompletedOrderId] = useState("");
+  const [kycReadyToConfirm, setKycReadyToConfirm] = useState(false);
   const [catalog, setCatalog] = useState<DemoProduct[]>(FALLBACK_PRODUCTS);
   const [clientGeo, setClientGeo] = useState<GeoLocation | null>(null);
   const [deviceFingerprint, setDeviceFingerprint] = useState("");
@@ -384,7 +468,19 @@ export default function PondoCheckoutPage() {
     () => cartLines.reduce((sum, line) => sum + line.lineCents, 0),
     [cartLines],
   );
-  const requiresEnhancedRiskChecks = cartSubtotalCents > 1_000_000;
+  const projectedRisk = useMemo(
+    () =>
+      computeProjectedRisk({
+        clientGeo,
+        city: addressValidation?.city || capturedCity,
+        province: addressValidation?.province || capturedProvince,
+        amountCents: cartSubtotalCents,
+        deviceFingerprint,
+      }),
+    [addressValidation?.city, addressValidation?.province, capturedCity, capturedProvince, cartSubtotalCents, clientGeo, deviceFingerprint],
+  );
+  const requiresEnhancedRiskChecks = projectedRisk.decision !== "auto_approve";
+  const requiresKycPipelineView = selectedProfile.screeningMode === "full" || projectedRisk.decision !== "auto_approve";
   const normalizedIdNumber = capturedIdNumber.replace(/\D/g, "");
   const isSaidComplete = normalizedIdNumber.length === 13;
   const isSaidValid = isSaidComplete && validateSAID(normalizedIdNumber);
@@ -427,6 +523,7 @@ export default function PondoCheckoutPage() {
       setCompletedTransaction(null);
       setCompletedRiskAssessment(null);
       setCompletedOrderId("");
+      setKycReadyToConfirm(false);
       setDeliveryDate("");
       setDeliveryWindow("");
       setProcessingMessage("");
@@ -563,7 +660,7 @@ export default function PondoCheckoutPage() {
   async function runScreeningJourney() {
     if (!customer) return null;
 
-    if (selectedProfile.screeningMode === "skip" && !requiresEnhancedRiskChecks) {
+    if (selectedProfile.screeningMode === "skip" && projectedRisk.decision === "auto_approve") {
       const autoApproved: VetResult = {
         transunionScore: 0,
         transunionApproved: true,
@@ -602,8 +699,8 @@ export default function PondoCheckoutPage() {
     log(`Experian affordability: income ${new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR", maximumFractionDigits: 0 }).format(experianIncome)}/mo`);
     log(`Geo-location reviewed: ${capturedCity}, ${capturedProvince}`);
     log(`Python fraud score: ${fraudScore.toFixed(2)} (${fraudScore <= 0.08 ? "low risk" : "high risk"})`);
-    if (requiresEnhancedRiskChecks) {
-      log("High-value order detected (> R10,000). Enhanced risk checks were enforced.");
+    if (projectedRisk.decision !== "auto_approve") {
+      log(`Geo-risk band ${projectedRisk.score} triggered ${riskDecisionLabel(projectedRisk.decision).toLowerCase()}.`);
     }
     log(approved ? "All checks passed - customer approved for checkout" : "Checks failed - manual review required");
     return result;
@@ -696,7 +793,7 @@ export default function PondoCheckoutPage() {
       } else {
         setProcessingMessage(
           requiresEnhancedRiskChecks
-            ? "High-value order detected. Running enhanced fraud and geolocation checks..."
+            ? "Geo-risk score exceeded the auto-approve band. Running elevated verification checks..."
             : "Profile is exempt from background checks. Finalizing order confirmation...",
         );
       }
@@ -704,6 +801,13 @@ export default function PondoCheckoutPage() {
       const result = await runScreeningJourney();
       if (!result?.approved) {
         throw new Error("Customer did not pass the required background checks.");
+      }
+
+      if (requiresKycPipelineView) {
+        setKycReadyToConfirm(true);
+        setProcessingMessage("");
+        log("Verification pipeline completed. Awaiting final order confirmation.");
+        return;
       }
 
       setProcessingMessage("Checks passed. Writing the order to Supabase and marking it as awaiting PED payment...");
@@ -719,7 +823,24 @@ export default function PondoCheckoutPage() {
     }
   }
 
-  const step3Label = completedOrderId ? "Completed" : "OTP Verification";
+  async function onConfirmVerifiedOrder() {
+    setError("");
+    setBusy(true);
+    setProcessingMessage("All checks passed. Writing the order to Supabase...");
+    try {
+      await completeApprovedPurchase();
+      setKycReadyToConfirm(false);
+      setProcessingMessage("");
+      setStep(4);
+    } catch (e) {
+      setProcessingMessage("");
+      setError(e instanceof Error ? e.message : "order_confirmation_failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const step3Label = completedOrderId ? "Completed" : requiresKycPipelineView ? "KYC Verification" : "OTP Verification";
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#e9f1ff_0%,#f7faff_34%,#edf4ff_100%)] text-pondo-navy-900">
@@ -970,76 +1091,143 @@ export default function PondoCheckoutPage() {
                 </div>
 
                 <button onClick={onContinueToOtp} disabled={busy || addressLookupBusy || addressValidationBusy} className={primaryCtaClass}>
-                  {busy ? "Sending OTP..." : addressValidationBusy ? "Validating Address..." : "Continue to OTP Verification"}
+                  {busy ? "Sending OTP..." : addressValidationBusy ? "Validating Address..." : requiresKycPipelineView ? "Continue to KYC Verification" : "Continue to OTP Verification"}
                 </button>
               </div>
             ) : null}
 
             {step === 3 && customer ? (
               <div className="space-y-4">
-                <div className="rounded-2xl border border-pondo-line bg-[#f7faff] p-4">
-                  <h2 className="text-2xl font-extrabold">OTP Verification</h2>
-                  <p className="mt-2 text-sm text-slate-700">
-                    We sent a one-time PIN by SMS to <span className="font-bold">{capturedPhone}</span>. Verify the OTP to continue.
-                    {selectedProfile.screeningMode === "full"
-                      ? " KYC, credit, fraud, affordability, and geolocation checks will run automatically after verification."
-                      : requiresEnhancedRiskChecks
-                        ? " High-value risk controls are active for this order, so enhanced checks will still run after verification."
-                        : " This profile will move directly to order confirmation after verification."}
-                  </p>
+                {!kycReadyToConfirm ? (
+                  <div className="rounded-2xl border border-pondo-line bg-[#f7faff] p-4">
+                    <h2 className="text-2xl font-extrabold">{requiresKycPipelineView ? "KYC Verification" : "OTP Verification"}</h2>
+                    <p className="mt-2 text-sm text-slate-700">
+                      We sent a one-time PIN by SMS to <span className="font-bold">{capturedPhone}</span>. Verify the OTP to continue.
+                      {selectedProfile.screeningMode === "full"
+                        ? " This profile continues into the full KYC, credit, affordability, fraud, and geolocation pipeline."
+                        : requiresEnhancedRiskChecks
+                          ? " This order sits above the auto-approve band, so elevated verification checks will run after OTP."
+                          : " This profile will move directly to order confirmation after verification."}
+                    </p>
 
-                  <div className="mt-5 flex flex-wrap items-center gap-2">
-                    <button
-                      onClick={async () => {
-                        setError("");
-                        setBusy(true);
-                        try {
-                          await requestOtp();
-                        } catch (e) {
-                          setError(e instanceof Error ? e.message : "otp_send_failed");
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                      disabled={busy}
-                      className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60"
-                    >
-                      Resend OTP to {capturedPhone}
-                    </button>
-                    {demoOtp ? <div className="text-xs font-semibold text-emerald-700">Demo OTP: {demoOtp}</div> : null}
-                  </div>
-
-                  <div className="mt-3">
-                    <input value={otpInput} onChange={(e) => setOtpInput(e.target.value)} placeholder="Enter OTP" className="w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-slate-800" />
-                    <button onClick={onVerifyOtp} disabled={busy || !otpRequestId || !otpInput.trim()} className="mt-3 rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60">
-                      {busy ? "Verifying..." : "Verify OTP"}
-                    </button>
-                  </div>
-
-                  {processingMessage ? (
-                    <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
-                      {processingMessage}
+                    <div className="mt-5 flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={async () => {
+                          setError("");
+                          setBusy(true);
+                          try {
+                            await requestOtp();
+                          } catch (e) {
+                            setError(e instanceof Error ? e.message : "otp_send_failed");
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                        disabled={busy}
+                        className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60"
+                      >
+                        Resend OTP to {capturedPhone}
+                      </button>
+                      {demoOtp ? <div className="text-xs font-semibold text-emerald-700">Demo OTP: {demoOtp}</div> : null}
                     </div>
-                  ) : null}
 
-                  {otpVerified && !processingMessage ? (
-                    <div className="mt-2 text-sm font-semibold text-emerald-700">OTP verified - identity confirmed</div>
-                  ) : null}
-                </div>
+                    <div className="mt-3">
+                      <input value={otpInput} onChange={(e) => setOtpInput(e.target.value)} placeholder="Enter OTP" className="w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-slate-800" />
+                      <button onClick={onVerifyOtp} disabled={busy || !otpRequestId || !otpInput.trim()} className="mt-3 rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60">
+                        {busy ? "Verifying..." : "Verify OTP"}
+                      </button>
+                    </div>
+
+                    {processingMessage ? (
+                      <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+                        {processingMessage}
+                      </div>
+                    ) : null}
+
+                    {otpVerified && !processingMessage ? (
+                      <div className="mt-2 text-sm font-semibold text-emerald-700">OTP verified - identity confirmed</div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-pondo-line bg-white p-6 shadow-sm">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <h2 className="text-2xl font-extrabold text-pondo-navy-900">KYC Verification Pipeline</h2>
+                        <p className="mt-2 max-w-2xl text-sm text-slate-700">
+                          This checkout requires elevated trust checks before the order can be released. IP and delivery mismatches are treated as risk signals, not fraud by default.
+                        </p>
+                      </div>
+                      <div className={[
+                        "rounded-full px-4 py-2 text-xs font-black uppercase tracking-[0.08em]",
+                        projectedRisk.decision === "manual_review_hold"
+                          ? "border border-red-200 bg-red-50 text-red-600"
+                          : "border border-amber-200 bg-amber-50 text-amber-700",
+                      ].join(" ")}>
+                        Risk Score: {projectedRisk.decision === "manual_review_hold" ? Math.max(projectedRisk.score, 100) : projectedRisk.score}
+                        {" - "}
+                        {riskDecisionLabel(projectedRisk.decision)}
+                      </div>
+                    </div>
+
+                    <div className="mt-5 space-y-3">
+                      {[
+                        { title: "OTP Verification", detail: "SMS one-time pin sent to registered number", state: "Passed" },
+                        { title: "ID / Document Scan", detail: "South African ID validation and identity confirmation", state: isSaidValid ? "Passed" : "Pending" },
+                        { title: "ITC Credit Check", detail: "TransUnion / Experian credit bureau inquiry", state: vetResult?.transunionApproved ? "Passed" : "Review" },
+                        { title: "Affordability Assessment", detail: "Income versus order-value ratio analysis", state: vetResult?.experianIncome ? "Passed" : "Review" },
+                        { title: "Fraud Screening", detail: "Geo-risk, device, and behaviour checks", state: vetResult?.approved ? "Passed" : "Review" },
+                      ].map((item) => (
+                        <div key={item.title} className="flex items-center justify-between rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-sm font-black text-white">✓</div>
+                            <div>
+                              <div className="font-bold text-emerald-800">{item.title}</div>
+                              <div className="text-xs text-slate-600">{item.detail}</div>
+                            </div>
+                          </div>
+                          <div className="text-xs font-black uppercase tracking-[0.08em] text-emerald-700">{item.state}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                        <div className="font-bold">Geo-risk band</div>
+                        <div className="mt-1">{projectedRisk.score <= 40 ? "0 - 40 auto-approve" : projectedRisk.score <= 70 ? "41 - 70 elevated verification" : "> 70 manual review hold"}</div>
+                      </div>
+                      <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                        <div className="font-bold">Mismatch handling</div>
+                        <div className="mt-1">{projectedRisk.ipMismatch ? "IP and delivery address do not match. This is normal for work-to-home deliveries and is not fraud by default." : "IP and delivery address align for this checkout."}</div>
+                      </div>
+                    </div>
+
+                    <button onClick={onConfirmVerifiedOrder} disabled={busy} className="mt-5 w-full rounded-xl bg-[#1fb782] px-4 py-3 text-lg font-black text-white shadow-[0_10px_20px_rgba(31,183,130,0.28)] hover:bg-[#19a575] disabled:opacity-60">
+                      {busy
+                        ? "Confirming..."
+                        : projectedRisk.decision === "manual_review_hold"
+                          ? "Complete Checks and Place Into Manual Review"
+                          : "All Checks Passed - Confirm Order"}
+                    </button>
+                  </div>
+                )}
               </div>
             ) : null}
 
             {step === 4 && completedOrderId ? (
               <div className="space-y-4">
-                <div className="rounded-2xl border border-emerald-300 bg-white p-5 shadow-sm">
+                <div className={completedRiskAssessment?.decision === "manual_review_hold" ? "rounded-2xl border border-red-300 bg-white p-5 shadow-sm" : "rounded-2xl border border-emerald-300 bg-white p-5 shadow-sm"}>
                   <div className="flex items-start gap-3">
                     <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-2xl font-black text-emerald-700">
                       ✓
                     </div>
                     <div>
-                      <h2 className="text-2xl font-extrabold text-emerald-950">Order received, thanks!</h2>
+                      <h2 className={completedRiskAssessment?.decision === "manual_review_hold" ? "text-2xl font-extrabold text-red-950" : "text-2xl font-extrabold text-emerald-950"}>
+                        {completedRiskAssessment?.decision === "manual_review_hold" ? "Order held for manual review" : "Order received, thanks!"}
+                      </h2>
                       <p className="text-sm text-slate-700">
-                        Confirmation has been sent to {capturedEmail} and SMS confirmation has been sent to {capturedPhone}. Payment will be collected on delivery using the PED device.
+                        {completedRiskAssessment?.decision === "manual_review_hold"
+                          ? `Confirmation has been sent to ${capturedEmail}. The order is paused for manual review before PED collection and fulfilment release.`
+                          : `Confirmation has been sent to ${capturedEmail} and SMS confirmation has been sent to ${capturedPhone}. Payment will be collected on delivery using the PED device.`}
                       </p>
                     </div>
                   </div>
@@ -1059,14 +1247,29 @@ export default function PondoCheckoutPage() {
                   </div>
 
                   <div className="mt-5 rounded-xl border border-pondo-line bg-[#f7faff] px-4 py-3 text-sm text-slate-700">
-                    Email and SMS notifications include the order summary, delivery address, estimated fulfilment date, and the PONDO verification outcome. Settlement and reconciliation will only update after PED payment is completed at the customer doorstep.
+                    {completedRiskAssessment?.decision === "manual_review_hold"
+                      ? "Ops review is now required. Settlement and reconciliation remain blank until manual release and PED payment both complete."
+                      : "Email and SMS notifications include the order summary, delivery address, estimated fulfilment date, and the PONDO verification outcome. Settlement and reconciliation will only update after PED payment is completed at the customer doorstep."}
                   </div>
 
                   {completedRiskAssessment ? (
-                    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                      <div className="font-bold text-pondo-navy-900">Geo-risk score: {completedRiskAssessment.score}</div>
-                      <div className="mt-1">Decision: {completedRiskAssessment.decision}</div>
-                      <div className="mt-1">Verification: {completedRiskAssessment.verifiedStatus}</div>
+                    <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                        <div className="font-bold text-pondo-navy-900">Geo-risk decision</div>
+                        <div className="mt-2 text-lg font-black text-pondo-navy-900">{completedRiskAssessment.score} pts - {completedRiskAssessment.decisionLabel}</div>
+                        <div className="mt-1">{completedRiskAssessment.bandLabel}</div>
+                        <div className="mt-2">{completedRiskAssessment.recommendedPath}</div>
+                        <div className="mt-2 text-xs uppercase tracking-[0.08em] text-slate-500">Verification: {completedRiskAssessment.verifiedStatus}</div>
+                      </div>
+                      <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                        <div className="font-bold">IP vs Address Review</div>
+                        <div className="mt-2">
+                          {completedRiskAssessment.flags.ipMismatch
+                            ? "Mismatch detected. This is not fraud by default and is treated as a verification signal only."
+                            : "IP region and delivery region align for this checkout."}
+                        </div>
+                        <div className="mt-2 text-xs text-sky-800">{completedRiskAssessment.factors.join(" | ")}</div>
+                      </div>
                     </div>
                   ) : null}
 
@@ -1080,12 +1283,12 @@ export default function PondoCheckoutPage() {
                   </div>
 
                   <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                    {vetResult?.screeningMode === "full" ? (
+                    {vetResult?.screeningMode === "full" || requiresEnhancedRiskChecks ? (
                       <>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">KYC verified</div>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Credit approved</div>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Affordability passed</div>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Fraud low risk</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">OTP verified</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">ID verified</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Credit and affordability checked</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">{completedRiskAssessment?.decision === "manual_review_hold" ? "Queued for manual review" : "Released to fulfilment"}</div>
                       </>
                     ) : (
                       <>
@@ -1136,6 +1339,10 @@ export default function PondoCheckoutPage() {
                 paymentSettlement ? (
                   <div className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
                     Supabase settlement recorded to {paymentSettlement.bankLabel} using {selectedPaymentMethodMeta.label}.
+                  </div>
+                ) : completedRiskAssessment?.decision === "manual_review_hold" ? (
+                  <div className="mt-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
+                    Manual review hold is active. PED collection, settlement, and reconciliation stay blocked until ops release the order.
                   </div>
                 ) : (
                   <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
