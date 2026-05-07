@@ -11,6 +11,9 @@ export type Transaction = {
   gateway: string;
   gateway_status: string;
   credit_tier: string | null;
+  risk_score?: number | null;
+  risk_decision?: string | null;
+  risk_level?: string | null;
   qr_payload: string;
   status: string;
   qr_scanned_at: string | null;
