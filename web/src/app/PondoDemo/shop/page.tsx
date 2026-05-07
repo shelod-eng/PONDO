@@ -140,7 +140,6 @@ export default function ShopPage() {
   const [category, setCategory] = useState("");
   const [sortBy, setSortBy] = useState("featured");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   const [cartPanelOpen, setCartPanelOpen] = useState(false);
   const [wishlist, setWishlist] = useState<string[]>([]);
 
@@ -156,7 +155,6 @@ export default function ShopPage() {
 
   async function load(nextQ = q, nextCategory = category) {
     setBusy(true);
-    setError("");
     try {
       const out = await fetchDemoProducts({ q: nextQ, category: nextCategory });
       setProducts(out.items);
@@ -164,7 +162,6 @@ export default function ShopPage() {
     } catch {
       setProducts(FALLBACK_PRODUCTS);
       setCategories(Array.from(new Set(FALLBACK_PRODUCTS.map((p) => p.category))));
-      setError("API temporarily unavailable. Showing fallback catalog.");
     } finally {
       setBusy(false);
     }
@@ -363,28 +360,6 @@ export default function ShopPage() {
               <div className="text-sm text-slate-500">{metric.label}</div>
             </div>
           ))}
-        </section>
-
-        {error ? (
-          <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
-            {error}
-          </div>
-        ) : null}
-
-        <section className="mt-4 rounded-xl border border-pondo-line bg-white p-4">
-          <div className="mb-3 text-sm font-semibold text-pondo-navy-900">
-            Fulfilment Partner Integrations
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-            {["Amazon SA", "Takealot", "Temu", "Shopify", "WooCommerce"].map((partner) => (
-              <div
-                key={partner}
-                className="rounded-lg border border-pondo-line bg-[#f7faff] px-3 py-2 text-center text-sm font-bold text-pondo-navy-800"
-              >
-                {partner}
-              </div>
-            ))}
-          </div>
         </section>
 
         <section id="pondo-product-grid" className="mt-5">

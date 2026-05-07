@@ -81,9 +81,7 @@ export default function ConfirmationPage() {
               <Link href="/PondoDemo/shop" className="text-sm font-semibold text-pondo-navy-800/80 hover:text-white hover:underline">
                 Continue shopping
               </Link>
-              <Link href="/PondoDemo/sponsor" className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-semibold text-pondo-navy-800 hover:bg-white/10">
-                View sponsor dashboard
-              </Link>
+
             </div>
           </div>
         ) : (
