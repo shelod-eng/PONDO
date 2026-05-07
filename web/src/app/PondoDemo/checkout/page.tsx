@@ -26,11 +26,12 @@ import {
   verifyOtp,
 } from "@/lib/api";
 import { PAYMENT_METHOD_OPTIONS, type PaymentMethod, paymentMethodLabel } from "@/lib/paymentMethods";
-import { fetchGeoLocation } from "@/lib/geolocation";
+import { createDeviceFingerprint } from "@/lib/deviceFingerprint";
+import { fetchGeoLocation, type GeoLocation } from "@/lib/geolocation";
 import { useAuth } from "@/lib/auth";
 import { usePondoCart } from "@/lib/pondoCart";
 import { FALLBACK_IMAGE, FALLBACK_PRODUCTS, IMAGE_BY_PRODUCT } from "@/lib/demoCatalog";
-import { validateSAID } from "@/lib/validateSAID";
+import { deriveSouthAfricanIdRisk, parseSouthAfricanId, validateSAID } from "@/lib/validateSAID";
 
 const partnerOptions: Array<{ id: PartnerName; label: string }> = [
   { id: "amazon", label: "Amazon" },
@@ -102,6 +103,11 @@ const DEMO_CUSTOMER_PROFILES: DemoCustomerProfile[] = [
   },
 ];
 
+const DELIVERY_TIME_SLOTS = [
+  { id: "09:00-11:00", label: "09:00 - 11:00" },
+  { id: "12:00-15:00", label: "12:00 - 15:00" },
+] as const;
+
 function money(cents: number) {
   return new Intl.NumberFormat("en-ZA", {
     style: "currency",
@@ -132,6 +138,30 @@ function etaDateLabel() {
 
 function formatCombinedAddress(address: string, city: string, province: string, postalCode: string) {
   return [address, city, province, postalCode].map((part) => part.trim()).filter(Boolean).join(", ");
+}
+
+function toDateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function minDeliveryDateValue() {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  return toDateInputValue(date);
+}
+
+function formatDeliveryDateLabel(value: string) {
+  if (!value) return "";
+  const parsed = new Date(`${value}T00:00:00`);
+  return new Intl.DateTimeFormat("en-ZA", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).format(parsed);
 }
 
 function createAddressSessionToken() {
@@ -206,6 +236,8 @@ export default function PondoCheckoutPage() {
   const [capturedCity, setCapturedCity] = useState("");
   const [capturedProvince, setCapturedProvince] = useState("");
   const [capturedPostalCode, setCapturedPostalCode] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
+  const [deliveryWindow, setDeliveryWindow] = useState("");
   const [geoLocationLoading, setGeoLocationLoading] = useState(false);
   const [saidBlurred, setSaidBlurred] = useState(false);
   const [addressSessionToken, setAddressSessionToken] = useState("");
@@ -222,6 +254,8 @@ export default function PondoCheckoutPage() {
   const [paymentSettlement, setPaymentSettlement] = useState<PaymentSettlement | null>(null);
   const [completedOrderId, setCompletedOrderId] = useState("");
   const [catalog, setCatalog] = useState<DemoProduct[]>(FALLBACK_PRODUCTS);
+  const [clientGeo, setClientGeo] = useState<GeoLocation | null>(null);
+  const [deviceFingerprint, setDeviceFingerprint] = useState("");
   const [, setApiLogs] = useState<string[]>(["Awaiting transaction initiation..."]);
 
   const customer = session?.customer || null;
@@ -229,6 +263,11 @@ export default function PondoCheckoutPage() {
   const selectedProfile = useMemo(
     () => DEMO_CUSTOMER_PROFILES.find((profile) => profile.email === email) || DEMO_CUSTOMER_PROFILES[0],
     [email],
+  );
+  const minimumDeliveryDate = useMemo(() => minDeliveryDateValue(), []);
+  const selectedDeliverySlot = useMemo(
+    () => DELIVERY_TIME_SLOTS.find((slot) => slot.id === deliveryWindow) || null,
+    [deliveryWindow],
   );
   const selectedPaymentMethod: PaymentMethod = "card";
   const selectedPaymentMethodMeta = useMemo(
@@ -253,6 +292,10 @@ export default function PondoCheckoutPage() {
   useEffect(() => {
     if (!session?.customer) return;
 
+    createDeviceFingerprint()
+      .then((fingerprint) => setDeviceFingerprint(fingerprint))
+      .catch(() => setDeviceFingerprint(""));
+
     setCapturedFullName(session.customer.fullName);
     setCapturedIdNumber(session.customer.idNumber);
     setCapturedPhone(session.customer.phone);
@@ -269,6 +312,7 @@ export default function PondoCheckoutPage() {
     fetchGeoLocation()
       .then((geo) => {
         if (geo) {
+          setClientGeo(geo);
           setCapturedCity(geo.city);
           setCapturedProvince(geo.province);
           setCapturedPostalCode(geo.postalCode);
@@ -341,6 +385,8 @@ export default function PondoCheckoutPage() {
     [cartLines],
   );
   const normalizedIdNumber = capturedIdNumber.replace(/\D/g, "");
+  const saidDetails = useMemo(() => parseSouthAfricanId(normalizedIdNumber), [normalizedIdNumber]);
+  const saidRisk = useMemo(() => deriveSouthAfricanIdRisk(normalizedIdNumber), [normalizedIdNumber]);
   const isSaidComplete = normalizedIdNumber.length === 13;
   const isSaidValid = isSaidComplete && validateSAID(normalizedIdNumber);
   const showSaidFeedback = saidBlurred;
@@ -380,6 +426,8 @@ export default function PondoCheckoutPage() {
       setVetResult(null);
       setPaymentSettlement(null);
       setCompletedOrderId("");
+      setDeliveryDate("");
+      setDeliveryWindow("");
       setProcessingMessage("");
       setStep(2);
       log(`Partner profile fetched: ${out.session.product.name} @ ${money(out.session.product.priceCents)}`);
@@ -488,6 +536,18 @@ export default function PondoCheckoutPage() {
       setError("Please accept Terms & Conditions before proceeding.");
       return;
     }
+    if (!deliveryDate) {
+      setError("Please choose a delivery date before proceeding.");
+      return;
+    }
+    if (deliveryDate < minimumDeliveryDate) {
+      setError("Please choose a delivery date from tomorrow onward.");
+      return;
+    }
+    if (!deliveryWindow) {
+      setError("Please choose a delivery time slot before proceeding.");
+      return;
+    }
 
     setError("");
     setBusy(true);
@@ -510,6 +570,9 @@ export default function PondoCheckoutPage() {
       });
       log("T&C accepted - POPIA consent captured");
       log("Checkout session persisted to the PostgreSQL workflow store.");
+      if (saidRisk) {
+        log(`SA ID derived age ${saidRisk.age} (+${saidRisk.ageScore}) and sex ${saidRisk.gender} (+${saidRisk.genderScore}).`);
+      }
       await requestOtp();
       setStep(3);
     } catch (e) {
@@ -580,8 +643,37 @@ export default function PondoCheckoutPage() {
           city: capturedCity,
           province: capturedProvince,
           postalCode: capturedPostalCode,
+          deliveryDate,
+          deliveryWindow,
         },
         paymentMethod: selectedPaymentMethod,
+        riskContext: {
+          idNumber: normalizedIdNumber,
+          deviceFingerprint,
+          clientGeo: clientGeo
+            ? {
+                ip: clientGeo.ip,
+                city: clientGeo.city,
+                province: clientGeo.province,
+                country: clientGeo.country,
+                postalCode: clientGeo.postalCode,
+                latitude: clientGeo.latitude,
+                longitude: clientGeo.longitude,
+                source: clientGeo.source,
+              }
+            : undefined,
+          validatedAddress: addressValidation
+            ? {
+                city: addressValidation.city,
+                province: addressValidation.province,
+                postalCode: addressValidation.postalCode,
+                latitude: addressValidation.latitude,
+                longitude: addressValidation.longitude,
+              }
+            : undefined,
+          otpVerified: true,
+          saidVerified: isSaidValid,
+        },
       });
 
       const pay = await payDemoOrder(authToken, order.transaction.id, selectedPaymentMethod, {
@@ -783,6 +875,12 @@ export default function PondoCheckoutPage() {
                         <p className="mt-1 text-xs font-semibold text-red-600">Enter a valid 13-digit South African ID number.</p>
                       )
                     ) : null}
+                    {saidDetails ? (
+                      <p className="mt-1 text-xs text-slate-500">
+                        DOB: {saidDetails.birthDate} | Age: {saidDetails.age} | Sex: {saidDetails.gender === "male" ? "Male" : "Female"}
+                        {saidRisk ? ` | Risk +${saidRisk.totalScore}` : ""}
+                      </p>
+                    ) : null}
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-bold text-slate-600">Phone Number</label>
@@ -871,6 +969,37 @@ export default function PondoCheckoutPage() {
                       )
                     ) : null}
                   </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-600">Delivery Date</label>
+                    <input
+                      type="date"
+                      min={minimumDeliveryDate}
+                      value={deliveryDate}
+                      onChange={(e) => setDeliveryDate(e.target.value)}
+                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-600">Delivery Time Slot</label>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {DELIVERY_TIME_SLOTS.map((slot) => {
+                        const active = deliveryWindow === slot.id;
+                        return (
+                          <button
+                            key={slot.id}
+                            type="button"
+                            onClick={() => setDeliveryWindow(slot.id)}
+                            className={[
+                              "rounded-lg border px-3 py-2 text-sm font-semibold transition",
+                              active ? "border-pondo-orange-500 bg-pondo-orange-50 text-pondo-orange-700" : "border-pondo-line bg-white text-slate-700 hover:bg-slate-50",
+                            ].join(" ")}
+                          >
+                            {slot.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="rounded-xl border border-pondo-line bg-pondo-surface-soft p-3">
@@ -900,6 +1029,11 @@ export default function PondoCheckoutPage() {
                       ? " KYC, credit, fraud, affordability, and geolocation checks will run automatically after verification."
                       : " This profile will move directly to order confirmation after verification."}
                   </p>
+                  {clientGeo ? (
+                    <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+                      IP/Geo context: {clientGeo.city}, {clientGeo.province}, {clientGeo.country} | source {clientGeo.source}
+                    </div>
+                  ) : null}
 
                   <div className="mt-5 flex flex-wrap items-center gap-2">
                     <button
@@ -960,8 +1094,8 @@ export default function PondoCheckoutPage() {
                   <div className="mt-5 border-t border-slate-200 pt-4 text-sm text-slate-800">
                     <p><span className="font-bold">Delivery to</span> {capturedFullName}, {capturedAddress}, South Africa</p>
                     <div className="mt-4">
-                      <div className="font-bold">{etaDateLabel()}</div>
-                      <div>Estimated delivery</div>
+                      <div className="font-bold">{deliveryDate ? formatDeliveryDateLabel(deliveryDate) : etaDateLabel()}</div>
+                      <div>{selectedDeliverySlot ? `Delivery window: ${selectedDeliverySlot.label}` : "Estimated delivery"}</div>
                     </div>
                     <div className="mt-4">
                       <div><span className="font-bold">Partner:</span> {session?.partnerLabel} fulfilment</div>

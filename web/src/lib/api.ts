@@ -45,6 +45,32 @@ export type DeliveryDetails = {
   city: string;
   province: string;
   postalCode: string;
+  deliveryDate?: string;
+  deliveryWindow?: string;
+};
+
+export type OrderRiskContext = {
+  idNumber?: string;
+  deviceFingerprint?: string;
+  clientGeo?: {
+    ip?: string;
+    city?: string;
+    province?: string;
+    country?: string;
+    postalCode?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    source?: string;
+  };
+  validatedAddress?: {
+    city?: string;
+    province?: string;
+    postalCode?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+  };
+  otpVerified?: boolean;
+  saidVerified?: boolean;
 };
 
 export type DemoOrderDetail = { transaction: Transaction; details: unknown; audit: AuditEntry[] };
@@ -286,7 +312,14 @@ export async function simulateDemoCredit(input: { saId: string; bureau: "transun
 
 export async function createDemoOrder(
   token: string,
-  input: { customerId: string; sessionId?: string; items: Array<{ productId: string; qty: number }>; delivery: DeliveryDetails; paymentMethod: PaymentMethod },
+  input: {
+    customerId: string;
+    sessionId?: string;
+    items: Array<{ productId: string; qty: number }>;
+    delivery: DeliveryDetails;
+    paymentMethod: PaymentMethod;
+    riskContext?: OrderRiskContext;
+  },
 ) {
   return apiFetch<{ transaction: Transaction; qrPayload: string }>("/api/pondo/orders", { method: "POST", token, body: JSON.stringify(input) });
 }

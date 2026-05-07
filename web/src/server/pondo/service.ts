@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { getPool } from "./db";
+import { assessGeoRisk, lookupIpGeo, type ClientGeo, type ValidatedAddress } from "./risk";
 
 type PartnerName = "amazon" | "temu" | "takealot" | "woocommerce" | "shopify";
 type PaymentMethod =
@@ -702,6 +703,7 @@ async function getPaymentTransactionById(id: string) {
 
 async function mapTransaction(row: {
   id: string;
+  checkout_session_id?: string | null;
   customer_id: string;
   amount_cents: number;
   currency: string;
@@ -716,6 +718,7 @@ async function mapTransaction(row: {
   external_ref: string | null;
 }) {
   const email = await getPrimaryEmail(row.customer_id);
+  const risk = row.checkout_session_id ? await getLatestRiskAssessment(row.checkout_session_id) : null;
   return {
     id: row.id,
     customer_id: email,
@@ -725,6 +728,9 @@ async function mapTransaction(row: {
     gateway: row.gateway_code,
     gateway_status: row.gateway_status,
     credit_tier: null,
+    risk_score: risk?.score ?? null,
+    risk_decision: risk?.decision ?? null,
+    risk_level: risk?.decision ?? null,
     qr_payload: signedQrPayload({
       transactionId: row.id,
       amountCents: Number(row.amount_cents),
@@ -1206,8 +1212,17 @@ export async function createOrder(input: {
   customerEmail: string;
   sessionId?: string;
   items: Array<{ productId: string; qty: number }>;
-  delivery: { fullName: string; phone: string; address1: string; city: string; province: string; postalCode: string };
+  delivery: { fullName: string; phone: string; address1: string; city: string; province: string; postalCode: string; deliveryDate?: string; deliveryWindow?: string };
   paymentMethod: PaymentMethod;
+  riskContext?: {
+    idNumber?: string;
+    deviceFingerprint?: string;
+    clientGeo?: ClientGeo;
+    validatedAddress?: ValidatedAddress;
+    otpVerified?: boolean;
+    saidVerified?: boolean;
+  };
+  requestIp?: string;
 }) {
   const session = input.sessionId ? await getCheckoutSessionByCode(input.sessionId) : null;
   if (input.sessionId && !session) throw new Error("session_not_found");
@@ -1222,11 +1237,18 @@ export async function createOrder(input: {
   });
 
   const resolvedDelivery = deriveDeliveryLocation(input.delivery.address1, input.delivery.city, input.delivery.province, input.delivery.postalCode);
+  const validatedDelivery = {
+    city: input.riskContext?.validatedAddress?.city || resolvedDelivery.city,
+    province: input.riskContext?.validatedAddress?.province || resolvedDelivery.province,
+    postalCode: input.riskContext?.validatedAddress?.postalCode || resolvedDelivery.postalCode,
+    latitude: input.riskContext?.validatedAddress?.latitude ?? null,
+    longitude: input.riskContext?.validatedAddress?.longitude ?? null,
+  };
   const addressId = await upsertDefaultAddress(customer.id, {
     address1: input.delivery.address1,
-    city: resolvedDelivery.city,
-    province: resolvedDelivery.province,
-    postalCode: resolvedDelivery.postalCode,
+    city: validatedDelivery.city,
+    province: validatedDelivery.province,
+    postalCode: validatedDelivery.postalCode,
   });
 
   const products = await Promise.all(input.items.map((item) => getProductBySku(item.productId)));
@@ -1299,11 +1321,34 @@ export async function createOrder(input: {
     resourceType: "payment_transaction",
     resourceId: paymentTransactionId,
     action: "order.created",
-    metadata: { paymentMethod: input.paymentMethod, subtotal },
+    metadata: {
+      paymentMethod: input.paymentMethod,
+      subtotal,
+      deliveryDate: input.delivery.deliveryDate || null,
+      deliveryWindow: input.delivery.deliveryWindow || null,
+      requestIp: input.requestIp || null,
+      deviceFingerprintPresent: Boolean(input.riskContext?.deviceFingerprint),
+    },
   });
+
+  let inlineRisk = null;
+  if (input.riskContext) {
+    const ipGeo = await lookupIpGeo(input.requestIp || "", input.riskContext.clientGeo);
+    inlineRisk = assessGeoRisk({
+      ipAddress: input.requestIp || input.riskContext.clientGeo?.ip || "",
+      ipGeo,
+      deliveryGeo: validatedDelivery,
+      amountCents: subtotal,
+      deviceFingerprint: input.riskContext.deviceFingerprint,
+      idNumber: input.riskContext.idNumber,
+      otpVerified: input.riskContext.otpVerified,
+      saidVerified: input.riskContext.saidVerified,
+    });
+  }
 
   const mapped = await mapTransaction({
     id: paymentTransactionId,
+    checkout_session_id: session?.id || null,
     customer_id: customer.id,
     amount_cents: subtotal,
     currency: "ZAR",
@@ -1318,7 +1363,7 @@ export async function createOrder(input: {
     external_ref: null,
   });
 
-  return { transaction: mapped, qrPayload: mapped.qr_payload };
+  return { transaction: mapped, qrPayload: mapped.qr_payload, riskAssessment: inlineRisk };
 }
 
 export async function settleOrder(input: {
@@ -1590,6 +1635,7 @@ export async function sponsorSummary() {
 export async function sponsorOrders() {
   const rows = await getPool().query<{
     id: string;
+    checkout_session_id: string | null;
     customer_id: string;
     amount_cents: number;
     currency: string;
@@ -1604,6 +1650,7 @@ export async function sponsorOrders() {
     payment_method_code: PaymentMethod;
   }>(
     `select pt.id,
+            pt.checkout_session_id,
             pt.customer_id,
             pt.amount_cents,
             pt.currency,
