@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { getPool } from "./db";
 
@@ -14,6 +15,95 @@ type PaymentMethod =
   | "evoucher_wallet";
 type SettlementBank = "absa" | "fnb" | "standard_bank";
 
+type PartnerSeed = {
+  fullName: string;
+  idNumber: string;
+  phone: string;
+  address: string;
+  city: string;
+  province: string;
+  postalCode: string;
+  geoLocation: string;
+  monthlyIncome: number;
+  affordabilityBand: string;
+  riskProfileCode: "high_risk_male" | "low_risk_female" | "elderly" | "standard";
+  verificationRoute: "full_kyc" | "otp_only" | "otp_plus_risk";
+};
+
+type CustomerRecord = {
+  id: string;
+  email: string;
+  fullName: string;
+  idNumber: string;
+  phone: string;
+  address: string;
+  city: string;
+  province: string;
+  postalCode: string;
+  geoLocation: string;
+  monthlyIncome: number;
+  affordabilityBand: string;
+  riskProfileCode: string;
+};
+
+type ProductRecord = {
+  id: string;
+  sku: string;
+  brand: string;
+  name: string;
+  category: string | null;
+  priceCents: number;
+  discountPct: number;
+  stock: number;
+  merchantName: string;
+};
+
+type CheckoutSessionRecord = {
+  id: string;
+  session_code: string;
+  customer_id: string;
+  partner_id: string | null;
+  current_step: string;
+  status: string;
+  verification_route: string;
+  customer_snapshot: Record<string, unknown>;
+};
+
+type ConfirmCheckoutDetailsInput = {
+  sessionId: string;
+  email: string;
+  fullName: string;
+  idNumber: string;
+  phone: string;
+  address: string;
+  city: string;
+  province: string;
+  postalCode: string;
+  geoLocation?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  termsAccepted: boolean;
+};
+
+type RecordRiskAssessmentInput = {
+  actor: string;
+  sessionId: string;
+  saId: string;
+  bureau: "transunion" | "experian";
+  screeningMode: "full" | "skip";
+  transunionScore: number | null;
+  transunionApproved: boolean;
+  kycIdentityVerified: boolean;
+  experianIncome: number;
+  fraudScore: number;
+  approved: boolean;
+  city?: string;
+  province?: string;
+  postalCode?: string;
+};
+
+const CORE_SCHEMA = "pondo_core";
+
 const partnerLabels: Record<PartnerName, string> = {
   amazon: "Amazon SA",
   temu: "Temu",
@@ -22,7 +112,7 @@ const partnerLabels: Record<PartnerName, string> = {
   shopify: "Shopify",
 };
 
-const partnerSeeds = {
+const partnerSeeds: Record<string, PartnerSeed> = {
   "thabo@email.com": {
     fullName: "Thabo Nkosi",
     idNumber: "8501015800088",
@@ -34,6 +124,8 @@ const partnerSeeds = {
     geoLocation: "-26.2041, 28.0473",
     monthlyIncome: 28000,
     affordabilityBand: "A",
+    riskProfileCode: "high_risk_male",
+    verificationRoute: "full_kyc",
   },
   "naledi@email.com": {
     fullName: "Naledi Dlamini",
@@ -46,6 +138,8 @@ const partnerSeeds = {
     geoLocation: "-26.2347, 27.9084",
     monthlyIncome: 25000,
     affordabilityBand: "B",
+    riskProfileCode: "low_risk_female",
+    verificationRoute: "otp_only",
   },
   "sipho@email.com": {
     fullName: "Sipho Molefe",
@@ -56,8 +150,24 @@ const partnerSeeds = {
     province: "KwaZulu-Natal",
     postalCode: "4001",
     geoLocation: "-29.8587, 31.0218",
-    monthlyIncome: 14000,
+    monthlyIncome: 19000,
     affordabilityBand: "B",
+    riskProfileCode: "high_risk_male",
+    verificationRoute: "full_kyc",
+  },
+  "mandla@email.com": {
+    fullName: "Mandla Khumalo",
+    idNumber: "9002145809084",
+    phone: "+27 83 456 7721",
+    address: "44 Luthuli Ave, Umlazi, KZN",
+    city: "Durban",
+    province: "KwaZulu-Natal",
+    postalCode: "4031",
+    geoLocation: "-29.9708, 30.9245",
+    monthlyIncome: 22000,
+    affordabilityBand: "B",
+    riskProfileCode: "high_risk_male",
+    verificationRoute: "full_kyc",
   },
   "amara@email.com": {
     fullName: "Amara Naidoo",
@@ -70,19 +180,23 @@ const partnerSeeds = {
     geoLocation: "-26.1076, 28.0567",
     monthlyIncome: 36000,
     affordabilityBand: "A+",
+    riskProfileCode: "low_risk_female",
+    verificationRoute: "otp_only",
   },
-} as const;
-
-const paymentMethodMeta: Record<PaymentMethod, { gateway: string; requiresCreditVet: boolean }> = {
-  card: { gateway: "peach", requiresCreditVet: false },
-  card_3ds: { gateway: "peach", requiresCreditVet: false },
-  debit_card: { gateway: "peach", requiresCreditVet: false },
-  eft: { gateway: "ozow", requiresCreditVet: false },
-  payfast: { gateway: "payfast", requiresCreditVet: false },
-  bnpl: { gateway: "payflex", requiresCreditVet: true },
-  speedpoint: { gateway: "speedpoint", requiresCreditVet: false },
-  ussd: { gateway: "ussd", requiresCreditVet: false },
-  evoucher_wallet: { gateway: "wallet", requiresCreditVet: false },
+  "gogo@email.com": {
+    fullName: "Gogo Mokoena",
+    idNumber: "5506240800087",
+    phone: "+27 78 222 3344",
+    address: "17 Church St, Polokwane, Limpopo",
+    city: "Polokwane",
+    province: "Limpopo",
+    postalCode: "0700",
+    geoLocation: "-23.9045, 29.4689",
+    monthlyIncome: 12000,
+    affordabilityBand: "A",
+    riskProfileCode: "elderly",
+    verificationRoute: "otp_only",
+  },
 };
 
 const bankAccounts: Record<SettlementBank, { bankLabel: string; accountRef: string }> = {
@@ -91,20 +205,36 @@ const bankAccounts: Record<SettlementBank, { bankLabel: string; accountRef: stri
   standard_bank: { bankLabel: "Standard Bank Business Account", accountRef: "STD-***-5560" },
 };
 
-const deliverySteps = [
-  { title: "Dispatch Initiation", detail: "Email, WhatsApp, and SMS dispatches confirm that the order is in route." },
-  { title: "Active Tracking", detail: "System confirms live dispatch and starts real-time package tracking." },
-  { title: "Driver Assignment", detail: "PONDO verifies and confirms the specific delivery person to the buyer." },
-  { title: "On-Site Verification", detail: "Identity is verified at the door with physical identification checks." },
-  { title: "Conclusion", detail: "Final payment confirmation automatically triggers invoice initiation." },
-];
+const paymentMethodMeta: Record<PaymentMethod, { gateway: string; requiresCreditVet: boolean; label: string }> = {
+  card: { gateway: "peach", requiresCreditVet: false, label: "Bank Card" },
+  card_3ds: { gateway: "peach", requiresCreditVet: false, label: "3DS Card" },
+  debit_card: { gateway: "peach", requiresCreditVet: false, label: "Debit Card" },
+  eft: { gateway: "ozow", requiresCreditVet: false, label: "EFT" },
+  payfast: { gateway: "payfast", requiresCreditVet: false, label: "PayFast" },
+  bnpl: { gateway: "payflex", requiresCreditVet: true, label: "Buy Now Pay Later" },
+  speedpoint: { gateway: "speedpoint", requiresCreditVet: false, label: "Speedpoint" },
+  ussd: { gateway: "ussd", requiresCreditVet: false, label: "USSD" },
+  evoucher_wallet: { gateway: "wallet", requiresCreditVet: false, label: "eVoucher Wallet" },
+};
 
-function nowIso() {
-  return new Date().toISOString();
+const deliverySteps = [
+  { code: "dispatch_initiation", title: "Dispatch Initiation", detail: "Email, WhatsApp, and SMS dispatches confirm that the order is in route." },
+  { code: "active_tracking", title: "Active Tracking", detail: "System confirms live dispatch and starts real-time package tracking." },
+  { code: "driver_assignment", title: "Driver Assignment", detail: "PONDO verifies and confirms the specific delivery person to the buyer." },
+  { code: "onsite_verification", title: "On-Site Verification", detail: "Identity is verified at the door with physical identification checks." },
+  { code: "conclusion", title: "Conclusion", detail: "Final payment confirmation automatically triggers invoice initiation." },
+] as const;
+
+function table(name: string) {
+  return `${CORE_SCHEMA}.${name}`;
 }
 
-function randomCode(prefix: string, size = 5) {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 2 + size)}`;
+function safeEmail(email: string) {
+  return String(email || "").trim().toLowerCase();
+}
+
+function hashText(value: string) {
+  return crypto.createHash("sha256").update(value).digest("hex");
 }
 
 function secret() {
@@ -115,209 +245,955 @@ function signedQrPayload(data: Record<string, unknown>) {
   return jwt.sign(data, secret(), { expiresIn: "7d" });
 }
 
-async function ensureCustomerByEmail(email: string, override?: Record<string, unknown>) {
-  const pool = getPool();
-  const safeEmail = String(email || "").trim().toLowerCase();
-  const seed = partnerSeeds[safeEmail as keyof typeof partnerSeeds] || {
-    fullName: "Demo Customer",
-    idNumber: "8001015009087",
-    phone: "+27 71 000 0000",
-    address: "12 Main Rd, Johannesburg, Gauteng",
-    city: "Johannesburg",
-    province: "Gauteng",
-    postalCode: "2000",
-    geoLocation: "-26.2041, 28.0473",
-    monthlyIncome: 18000,
-    affordabilityBand: "B",
-  };
-  const profile = { ...seed, ...override };
-
-  const existing = await pool.query("select * from customers where email = $1 limit 1", [safeEmail]);
-  if (existing.rows[0]) {
-    const row = existing.rows[0];
-    await pool.query(
-      `update customers
-       set full_name = $2, id_number = $3, phone = $4, address_line = $5, city = $6, province = $7,
-           postal_code = $8, monthly_income = $9, affordability_band = $10, updated_at = now()
-       where id = $1`,
-      [row.id, profile.fullName, profile.idNumber, profile.phone, profile.address, profile.city, profile.province, profile.postalCode, profile.monthlyIncome, profile.affordabilityBand],
-    );
-    return {
-      id: row.id as string,
-      email: safeEmail,
-      ...profile,
-    };
-  }
-
-  const inserted = await pool.query(
-    `insert into customers
-      (email, full_name, id_number, phone, address_line, city, province, postal_code, monthly_income, affordability_band, source_payload)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-     returning id`,
-    [
-      safeEmail,
-      profile.fullName,
-      profile.idNumber,
-      profile.phone,
-      profile.address,
-      profile.city,
-      profile.province,
-      profile.postalCode,
-      profile.monthlyIncome,
-      profile.affordabilityBand,
-      JSON.stringify(profile),
-    ],
+function defaultSeed(email: string): PartnerSeed {
+  const key = safeEmail(email);
+  return (
+    partnerSeeds[key] || {
+      fullName: "Demo Customer",
+      idNumber: "8001015009087",
+      phone: "+27 71 000 0000",
+      address: "12 Main Rd, Johannesburg, Gauteng",
+      city: "Johannesburg",
+      province: "Gauteng",
+      postalCode: "2000",
+      geoLocation: "-26.2041, 28.0473",
+      monthlyIncome: 18000,
+      affordabilityBand: "B",
+      riskProfileCode: "standard",
+      verificationRoute: "otp_plus_risk",
+    }
   );
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function randomCode(prefix: string, size = 5) {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 2 + size)}`;
+}
+
+function deriveDeliveryLocation(address1: string, city: string, province: string, postalCode: string) {
+  const normalizedAddress = String(address1 || "").trim();
+  const tokens = normalizedAddress
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const detectedPostalCode = postalCode.trim() || normalizedAddress.match(/\b\d{4}\b/)?.[0] || "";
+  const cleanedLastToken = tokens[tokens.length - 1]?.replace(/\b\d{4}\b/g, "").trim() || "";
+  const fallbackProvince = tokens.length >= 3 ? cleanedLastToken : "";
+  const fallbackCity = tokens.length >= 3 ? tokens[tokens.length - 2] : tokens.length === 2 ? tokens[tokens.length - 1] : "";
 
   return {
-    id: inserted.rows[0].id as string,
-    email: safeEmail,
-    ...profile,
+    city: city.trim() || fallbackCity,
+    province: province.trim() || fallbackProvince,
+    postalCode: detectedPostalCode,
   };
 }
 
-async function getProductById(id: string) {
+function demoStockForCategory(category: string | null) {
+  return category === "Fashion" ? 25 : 12;
+}
+
+function maskDestination(channel: "sms" | "email", destination: string) {
+  if (channel === "email") {
+    const [user, domain] = destination.split("@");
+    if (!user || !domain) return "hidden@email";
+    return `${user.slice(0, 2)}***@${domain}`;
+  }
+  return `${destination.slice(0, 3)}******${destination.slice(-2)}`;
+}
+
+async function queryOne<T = Record<string, unknown>>(sql: string, values: unknown[] = []) {
   const pool = getPool();
-  const result = await pool.query("select * from products where id = $1 limit 1", [id]);
+  const result = await pool.query<T>(sql, values);
   return result.rows[0] || null;
 }
 
+async function ensureRiskProfileId(code: string) {
+  const row = await queryOne<{ id: string }>(`select id from ${table("risk_profiles")} where code = $1 limit 1`, [code]);
+  return row?.id || null;
+}
+
+async function getPrimaryEmail(customerId: string) {
+  const row = await queryOne<{ contact_value: string }>(
+    `select contact_value
+     from ${table("customer_contact_methods")}
+     where customer_id = $1 and contact_type = 'email'
+     order by is_primary desc, created_at asc
+     limit 1`,
+    [customerId],
+  );
+  return row?.contact_value || "customer@example.com";
+}
+
+async function getPrimaryPhone(customerId: string) {
+  const row = await queryOne<{ contact_value: string }>(
+    `select contact_value
+     from ${table("customer_contact_methods")}
+     where customer_id = $1 and contact_type = 'phone'
+     order by is_primary desc, created_at asc
+     limit 1`,
+    [customerId],
+  );
+  return row?.contact_value || "+27XXXXXXXXX";
+}
+
+async function upsertCustomerContact(customerId: string, type: "email" | "phone", value: string, verified = false) {
+  const normalizedValue = type === "email" ? safeEmail(value) : String(value || "").trim();
+  if (!normalizedValue) return;
+  const hash = hashText(normalizedValue);
+  const existing = await queryOne<{ id: string; is_primary: boolean }>(
+    `select id, is_primary
+     from ${table("customer_contact_methods")}
+     where customer_id = $1 and contact_type = $2 and contact_value_hash = $3
+     limit 1`,
+    [customerId, type, hash],
+  );
+
+  if (existing) {
+    await getPool().query(
+      `update ${table("customer_contact_methods")}
+       set contact_value = $2,
+           is_primary = true,
+           is_verified = $3,
+           verified_at = case when $3 then coalesce(verified_at, now()) else verified_at end,
+           updated_at = now()
+       where id = $1`,
+      [existing.id, normalizedValue, verified],
+    );
+    await getPool().query(
+      `update ${table("customer_contact_methods")}
+       set is_primary = false, updated_at = now()
+       where customer_id = $1 and contact_type = $2 and id <> $3 and is_primary = true`,
+      [customerId, type, existing.id],
+    );
+    return;
+  }
+
+  await getPool().query(
+    `update ${table("customer_contact_methods")}
+     set is_primary = false, updated_at = now()
+     where customer_id = $1 and contact_type = $2 and is_primary = true`,
+    [customerId, type],
+  );
+
+  await getPool().query(
+    `insert into ${table("customer_contact_methods")}
+      (customer_id, contact_type, contact_value, contact_value_hash, is_primary, is_verified, verified_at)
+     values ($1,$2,$3,$4,true,$5,case when $5 then now() else null end)`,
+    [customerId, type, normalizedValue, hash, verified],
+  );
+}
+
+async function upsertDefaultAddress(
+  customerId: string,
+  input: { address1: string; city: string; province: string; postalCode: string; latitude?: number | null; longitude?: number | null },
+) {
+  const existing = await queryOne<{ id: string }>(
+    `select id from ${table("customer_addresses")} where customer_id = $1 and is_default = true limit 1`,
+    [customerId],
+  );
+
+  if (existing) {
+    await getPool().query(
+      `update ${table("customer_addresses")}
+       set address_line_1 = $2,
+           city = $3,
+           province = $4,
+           postal_code = $5,
+           latitude = $6,
+           longitude = $7,
+           validation_status = 'validated',
+           updated_at = now()
+       where id = $1`,
+      [existing.id, input.address1, input.city, input.province, input.postalCode, input.latitude ?? null, input.longitude ?? null],
+    );
+    return existing.id;
+  }
+
+  const inserted = await queryOne<{ id: string }>(
+    `insert into ${table("customer_addresses")}
+      (customer_id, label, address_line_1, city, province, postal_code, latitude, longitude, validation_status, is_default)
+     values ($1,'Primary',$2,$3,$4,$5,$6,$7,'validated',true)
+     returning id`,
+    [customerId, input.address1, input.city, input.province, input.postalCode, input.latitude ?? null, input.longitude ?? null],
+  );
+  return inserted?.id || null;
+}
+
+async function getCustomerByEmail(email: string): Promise<CustomerRecord | null> {
+  const row = await queryOne<{
+    customer_id: string;
+    full_name: string | null;
+    id_number_hash: string | null;
+    risk_profile_code: string | null;
+    address_line_1: string | null;
+    city: string | null;
+    province: string | null;
+    postal_code: string | null;
+  }>(
+    `select cp.id as customer_id,
+            cp.full_name,
+            cp.id_number_hash,
+            rp.code as risk_profile_code,
+            ca.address_line_1,
+            ca.city,
+            ca.province,
+            ca.postal_code
+     from ${table("customer_profiles")} cp
+     join ${table("customer_contact_methods")} cm
+       on cm.customer_id = cp.id
+      and cm.contact_type = 'email'
+      and cm.contact_value_hash = $1
+     left join ${table("risk_profiles")} rp on rp.id = cp.risk_profile_id
+     left join ${table("customer_addresses")} ca on ca.customer_id = cp.id and ca.is_default = true
+     order by cm.is_primary desc, cm.created_at asc
+     limit 1`,
+    [hashText(safeEmail(email))],
+  );
+
+  if (!row) return null;
+  const seeded = defaultSeed(email);
+  return {
+    id: row.customer_id,
+    email: safeEmail(email),
+    fullName: row.full_name || seeded.fullName,
+    idNumber: seeded.idNumber,
+    phone: (await getPrimaryPhone(row.customer_id)) || seeded.phone,
+    address: row.address_line_1 || seeded.address,
+    city: row.city || seeded.city,
+    province: row.province || seeded.province,
+    postalCode: row.postal_code || seeded.postalCode,
+    geoLocation: seeded.geoLocation,
+    monthlyIncome: seeded.monthlyIncome,
+    affordabilityBand: seeded.affordabilityBand,
+    riskProfileCode: row.risk_profile_code || seeded.riskProfileCode,
+  };
+}
+
+async function ensureCustomerByEmail(email: string, override?: Partial<CustomerRecord>) {
+  const normalizedEmail = safeEmail(email);
+  const seeded = defaultSeed(normalizedEmail);
+  const profile = {
+    email: normalizedEmail,
+    fullName: override?.fullName || seeded.fullName,
+    idNumber: override?.idNumber || seeded.idNumber,
+    phone: override?.phone || seeded.phone,
+    address: override?.address || seeded.address,
+    city: override?.city || seeded.city,
+    province: override?.province || seeded.province,
+    postalCode: override?.postalCode || seeded.postalCode,
+    geoLocation: override?.geoLocation || seeded.geoLocation,
+    monthlyIncome: override?.monthlyIncome || seeded.monthlyIncome,
+    affordabilityBand: override?.affordabilityBand || seeded.affordabilityBand,
+    riskProfileCode: override?.riskProfileCode || seeded.riskProfileCode,
+  };
+
+  const existing = await getCustomerByEmail(normalizedEmail);
+  const riskProfileId = await ensureRiskProfileId(profile.riskProfileCode);
+
+  if (existing) {
+    await getPool().query(
+      `update ${table("customer_profiles")}
+       set full_name = $2,
+           id_number_hash = $3,
+           risk_profile_id = $4,
+           updated_at = now()
+       where id = $1`,
+      [existing.id, profile.fullName, hashText(profile.idNumber), riskProfileId],
+    );
+    await upsertCustomerContact(existing.id, "email", normalizedEmail, true);
+    await upsertCustomerContact(existing.id, "phone", profile.phone, false);
+    await upsertDefaultAddress(existing.id, {
+      address1: profile.address,
+      city: profile.city,
+      province: profile.province,
+      postalCode: profile.postalCode,
+    });
+    return { ...existing, ...profile };
+  }
+
+  const inserted = await queryOne<{ id: string }>(
+    `insert into ${table("customer_profiles")}
+      (full_name, id_number_hash, risk_profile_id, current_status)
+     values ($1,$2,$3,'active')
+     returning id`,
+    [profile.fullName, hashText(profile.idNumber), riskProfileId],
+  );
+  if (!inserted) throw new Error("customer_create_failed");
+  await upsertCustomerContact(inserted.id, "email", normalizedEmail, true);
+  await upsertCustomerContact(inserted.id, "phone", profile.phone, false);
+  await upsertDefaultAddress(inserted.id, {
+    address1: profile.address,
+    city: profile.city,
+    province: profile.province,
+    postalCode: profile.postalCode,
+  });
+  return { id: inserted.id, ...profile };
+}
+
+async function getProductBySku(sku: string): Promise<ProductRecord | null> {
+  const row = await queryOne<{
+    id: string;
+    sku: string;
+    brand: string;
+    name: string;
+    category: string | null;
+    price_cents: number;
+    discount_pct: string | number | null;
+    merchant_name: string | null;
+  }>(
+    `select p.id,
+            p.sku,
+            p.brand,
+            p.name,
+            pc.name as category,
+            pp.amount_cents as price_cents,
+            pp.discount_pct,
+            p.merchant_name
+     from ${table("products")} p
+     left join ${table("product_categories")} pc on pc.id = p.category_id
+     join lateral (
+       select amount_cents, discount_pct
+       from ${table("product_prices")}
+       where product_id = p.id and effective_to is null
+       order by effective_from desc
+       limit 1
+     ) pp on true
+     where p.sku = $1 and p.is_active = true
+     limit 1`,
+    [sku],
+  );
+  if (!row) return null;
+  return {
+    id: row.id,
+    sku: row.sku,
+    brand: row.brand,
+    name: row.name,
+    category: row.category,
+    priceCents: Number(row.price_cents),
+    discountPct: Number(row.discount_pct || 0),
+    stock: demoStockForCategory(row.category),
+    merchantName: row.merchant_name || "TechHub SA",
+  };
+}
+
+function discountedPrice(product: ProductRecord) {
+  return Math.round(product.priceCents * (1 - product.discountPct / 100));
+}
+
+async function createAuditEvent(input: {
+  category: string;
+  actorType: "customer" | "system" | "admin" | "sponsor" | "fraud_analyst" | "partner" | "gateway";
+  actorId?: string | null;
+  customerId?: string | null;
+  checkoutSessionId?: string | null;
+  orderId?: string | null;
+  paymentTransactionId?: string | null;
+  resourceType: string;
+  resourceId: string;
+  action: string;
+  metadata?: Record<string, unknown>;
+}) {
+  await getPool().query(
+    `insert into ${table("audit_events")}
+      (event_category, actor_type, actor_id, customer_id, checkout_session_id, order_id, payment_transaction_id, resource_type, resource_id, action, metadata)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    [
+      input.category,
+      input.actorType,
+      input.actorId || null,
+      input.customerId || null,
+      input.checkoutSessionId || null,
+      input.orderId || null,
+      input.paymentTransactionId || null,
+      input.resourceType,
+      input.resourceId,
+      input.action,
+      JSON.stringify(input.metadata || {}),
+    ],
+  );
+}
+
+async function createCheckoutSessionEvent(checkoutSessionId: string, eventType: string, actorId: string | null, payload: Record<string, unknown>) {
+  await getPool().query(
+    `insert into ${table("checkout_session_events")}
+      (checkout_session_id, event_type, actor_type, actor_id, payload)
+     values ($1,$2,'system',$3,$4)`,
+    [checkoutSessionId, eventType, actorId, JSON.stringify(payload)],
+  );
+}
+
+async function getCheckoutSessionByCode(sessionCode: string): Promise<CheckoutSessionRecord | null> {
+  return await queryOne<CheckoutSessionRecord>(
+    `select id, session_code, customer_id, partner_id, current_step, status, verification_route, customer_snapshot
+     from ${table("checkout_sessions")}
+     where session_code = $1
+     limit 1`,
+    [sessionCode],
+  );
+}
+
+async function getPaymentMethodRow(code: PaymentMethod) {
+  const row = await queryOne<{ id: string; gateway_code: string; requires_credit_vet: boolean }>(
+    `select id, gateway_code, requires_credit_vet
+     from ${table("payment_methods")}
+     where code = $1
+     limit 1`,
+    [code],
+  );
+  if (!row) throw new Error("payment_method_not_configured");
+  return row;
+}
+
+async function getLatestRiskAssessment(sessionId: string) {
+  return await queryOne<{ id: string; decision: string; verification_status: string; score: number }>(
+    `select id, decision, verification_status, score
+     from ${table("risk_assessments")}
+     where checkout_session_id = $1
+     order by assessed_at desc
+     limit 1`,
+    [sessionId],
+  );
+}
+
+async function getPaymentTransactionById(id: string) {
+  return await queryOne<{
+    id: string;
+    order_id: string;
+    checkout_session_id: string | null;
+    customer_id: string;
+    external_ref: string | null;
+    amount_cents: number;
+    currency: string;
+    status: string;
+    gateway_code: string;
+    gateway_status: string;
+    reconciled_at: string | null;
+    settled_at: string | null;
+    created_at: string;
+    updated_at: string;
+    payment_method_code: PaymentMethod;
+  }>(
+    `select pt.id,
+            pt.order_id,
+            pt.checkout_session_id,
+            pt.customer_id,
+            pt.external_ref,
+            pt.amount_cents,
+            pt.currency,
+            pt.status,
+            pt.gateway_code,
+            pt.gateway_status,
+            pt.reconciled_at,
+            pt.settled_at,
+            pt.created_at,
+            pt.updated_at,
+            pm.code as payment_method_code
+     from ${table("payment_transactions")} pt
+     join ${table("payment_methods")} pm on pm.id = pt.payment_method_id
+     where pt.id = $1
+     limit 1`,
+    [id],
+  );
+}
+
+async function mapTransaction(row: {
+  id: string;
+  customer_id: string;
+  amount_cents: number;
+  currency: string;
+  payment_method_code: PaymentMethod;
+  gateway_code: string;
+  gateway_status: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  reconciled_at: string | null;
+  settled_at: string | null;
+  external_ref: string | null;
+}) {
+  const email = await getPrimaryEmail(row.customer_id);
+  return {
+    id: row.id,
+    customer_id: email,
+    amount_cents: Number(row.amount_cents),
+    currency: row.currency,
+    payment_method: row.payment_method_code,
+    gateway: row.gateway_code,
+    gateway_status: row.gateway_status,
+    credit_tier: null,
+    qr_payload: signedQrPayload({
+      transactionId: row.id,
+      amountCents: Number(row.amount_cents),
+      currency: row.currency,
+      customerId: email,
+    }),
+    status: row.status,
+    qr_scanned_at: null,
+    reconciled_at: row.reconciled_at,
+    settled_at: row.settled_at,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    external_ref: row.external_ref,
+  };
+}
+
 export async function listProducts(q?: string, category?: string) {
-  const pool = getPool();
   const values: unknown[] = [];
-  const filters: string[] = [];
+  const filters = ["p.is_active = true"];
   if (category) {
     values.push(category);
-    filters.push(`category = $${values.length}`);
+    filters.push(`pc.name = $${values.length}`);
   }
   if (q) {
     values.push(`%${q.toLowerCase()}%`);
-    filters.push(`lower(brand || ' ' || name) like $${values.length}`);
+    filters.push(`lower(p.brand || ' ' || p.name) like $${values.length}`);
   }
 
-  const where = filters.length ? `where ${filters.join(" and ")}` : "";
-  const items = await pool.query(`select * from products ${where} order by created_at asc, name asc`, values);
-  const categories = await pool.query("select distinct category from products where category is not null order by category asc");
-  const itemRows = items.rows as any[];
-  const categoryRows = categories.rows as any[];
+  const rows = await getPool().query<{
+    sku: string;
+    brand: string;
+    name: string;
+    category: string | null;
+    price_cents: number;
+    discount_pct: string | number | null;
+    merchant_name: string | null;
+  }>(
+    `select p.sku,
+            p.brand,
+            p.name,
+            pc.name as category,
+            pp.amount_cents as price_cents,
+            pp.discount_pct,
+            p.merchant_name
+     from ${table("products")} p
+     left join ${table("product_categories")} pc on pc.id = p.category_id
+     join lateral (
+       select amount_cents, discount_pct
+       from ${table("product_prices")}
+       where product_id = p.id and effective_to is null
+       order by effective_from desc
+       limit 1
+     ) pp on true
+     where ${filters.join(" and ")}
+     order by p.created_at asc, p.name asc`,
+    values,
+  );
+
+  const categories = await getPool().query<{ category: string }>(
+    `select distinct pc.name as category
+     from ${table("products")} p
+     left join ${table("product_categories")} pc on pc.id = p.category_id
+     where p.is_active = true and pc.name is not null
+     order by pc.name asc`,
+  );
+
   return {
-    items: itemRows.map((row: any) => ({
-      id: row.id,
+    items: rows.rows.map((row) => ({
+      id: row.sku,
       brand: row.brand,
       name: row.name,
       category: row.category,
-      priceCents: row.price_cents,
+      priceCents: Number(row.price_cents),
       discountPct: Number(row.discount_pct || 0),
-      rating: Number(row.rating || 0),
-      stock: row.stock_quantity,
+      rating: 4.7,
+      stock: demoStockForCategory(row.category),
+      merchantName: row.merchant_name || "TechHub SA",
     })),
-    categories: categoryRows.map((row: any) => row.category),
+    categories: categories.rows.map((row) => row.category),
   };
 }
 
 export async function bootstrapPartnerSession(partner: PartnerName, email: string) {
-  const pool = getPool();
-  const partnerResult = await pool.query("select * from partners where code = $1 limit 1", [partner]);
-  if (!partnerResult.rows[0]) throw new Error("unsupported_partner");
+  const partnerRow = await queryOne<{ id: string }>(`select id from ${table("partners")} where code = $1 limit 1`, [partner]);
+  if (!partnerRow) throw new Error("unsupported_partner");
+
   const customer = await ensureCustomerByEmail(email);
-  const product = (await getProductById("samsung-65-qled")) || (await pool.query("select * from products order by created_at asc limit 1")).rows[0];
+  const product = (await getProductBySku("samsung-65-qled")) || (await getProductBySku("samsung-s24"));
   if (!product) throw new Error("missing_demo_product");
 
   const sessionCode = randomCode("sess");
-  const cartSnapshot = [product].map((item) => ({
-    productId: item.id,
-    name: item.name,
-    priceCents: item.price_cents,
-    qty: 1,
-  }));
-  await pool.query(
-    `insert into checkout_sessions
-      (session_code, customer_id, partner_id, partner_code, partner_email, customer_snapshot, locked_cart_snapshot, partner_product_snapshot)
-     values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+  const riskProfileId = await ensureRiskProfileId(customer.riskProfileCode);
+  const seed = defaultSeed(email);
+  const cartSnapshot = [
+    {
+      productId: product.sku,
+      name: product.name,
+      priceCents: product.priceCents,
+      qty: 1,
+    },
+  ];
+  const customerSnapshot = {
+    email: customer.email,
+    fullName: customer.fullName,
+    idNumber: customer.idNumber,
+    phone: customer.phone,
+    address: customer.address,
+    city: customer.city,
+    province: customer.province,
+    postalCode: customer.postalCode,
+    geoLocation: customer.geoLocation,
+    monthlyIncome: customer.monthlyIncome,
+    affordabilityBand: customer.affordabilityBand,
+  };
+
+  const inserted = await queryOne<{ id: string }>(
+    `insert into ${table("checkout_sessions")}
+      (session_code, customer_id, partner_id, risk_profile_id, current_step, status, verification_route, source_channel, locked_cart_snapshot, customer_snapshot, partner_snapshot)
+     values ($1,$2,$3,$4,'press_buy','active',$5,'web',$6,$7,$8)
+     returning id`,
     [
       sessionCode,
       customer.id,
-      partnerResult.rows[0].id,
-      partner,
-      customer.email,
-      JSON.stringify(customer),
+      partnerRow.id,
+      riskProfileId,
+      seed.verificationRoute,
       JSON.stringify(cartSnapshot),
+      JSON.stringify(customerSnapshot),
       JSON.stringify({
-        id: product.id,
-        brand: product.brand,
-        name: product.name,
-        category: product.category,
-        priceCents: product.price_cents,
-        discountPct: Number(product.discount_pct || 0),
-        rating: Number(product.rating || 0),
-        stock: product.stock_quantity,
-        merchantName: product.merchant_name || "TechHub SA",
+        partner,
+        partnerLabel: partnerLabels[partner],
+        product: {
+          id: product.sku,
+          brand: product.brand,
+          name: product.name,
+          category: product.category,
+          priceCents: product.priceCents,
+          discountPct: product.discountPct,
+          rating: 4.7,
+          stock: product.stock,
+          merchantName: product.merchantName,
+        },
       }),
     ],
   );
+  if (!inserted) throw new Error("session_create_failed");
+  await createCheckoutSessionEvent(inserted.id, "partner.fetch_cart", customer.email, { partner, productId: product.sku });
 
   return {
     sessionId: sessionCode,
     partner,
     partnerLabel: partnerLabels[partner],
-    customer: {
-      email: customer.email,
-      fullName: customer.fullName,
-      idNumber: customer.idNumber,
-      phone: customer.phone,
-      address: customer.address,
-      geoLocation: customer.geoLocation,
-      monthlyIncome: customer.monthlyIncome,
-      affordabilityBand: customer.affordabilityBand,
-    },
+    customer: customerSnapshot,
     product: {
-      id: product.id,
+      id: product.sku,
       brand: product.brand,
       name: product.name,
       category: product.category,
-      priceCents: product.price_cents,
-      discountPct: Number(product.discount_pct || 0),
-      rating: Number(product.rating || 0),
-      stock: product.stock_quantity,
-      merchantName: product.merchant_name || "TechHub SA",
+      priceCents: product.priceCents,
+      discountPct: product.discountPct,
+      rating: 4.7,
+      stock: product.stock,
+      merchantName: product.merchantName,
     },
   };
 }
 
 export async function createOtpRequest(sessionId: string, channel: "sms" | "email", destination: string) {
-  const pool = getPool();
-  const session = await pool.query("select id from checkout_sessions where session_code = $1 limit 1", [sessionId]);
-  if (!session.rows[0]) throw new Error("session_not_found");
+  const session = await getCheckoutSessionByCode(sessionId);
+  if (!session) throw new Error("session_not_found");
+
   const requestId = randomCode("otp");
   const otpCode = "7842";
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-  await pool.query(
-    `insert into otp_requests
-      (checkout_session_id, request_code, channel, destination, otp_code, status, expires_at)
-     values ($1,$2,$3,$4,$5,'sent',$6)`,
-    [session.rows[0].id, requestId, channel, destination, otpCode, expiresAt.toISOString()],
+
+  await getPool().query(
+    `insert into ${table("otp_challenges")}
+      (checkout_session_id, channel, destination_hash, otp_hash, provider, provider_request_ref, status, expires_at)
+     values ($1,$2,$3,$4,'twilio',$5,'sent',$6)`,
+    [session.id, channel, hashText(destination.trim().toLowerCase()), hashText(otpCode), requestId, expiresAt.toISOString()],
   );
+  await getPool().query(
+    `update ${table("checkout_sessions")}
+     set current_step = 'otp_verification', status = 'otp_pending', updated_at = now()
+     where id = $1`,
+    [session.id],
+  );
+  await createCheckoutSessionEvent(session.id, "otp.sent", destination, { channel, requestId });
+
   return { requestId, expiresAt: expiresAt.getTime(), demoOtp: otpCode };
 }
 
 export async function verifyOtpRequest(requestId: string, code: string) {
-  const pool = getPool();
-  const result = await pool.query(
-    `select o.id, o.checkout_session_id, o.otp_code, o.expires_at, c.session_code
-     from otp_requests o
-     left join checkout_sessions c on c.id = o.checkout_session_id
-     where o.request_code = $1
+  const row = await queryOne<{
+    id: string;
+    checkout_session_id: string;
+    otp_hash: string;
+    expires_at: string | Date;
+    session_code: string;
+    attempt_count: number;
+    max_attempts: number;
+  }>(
+    `select oc.id,
+            oc.checkout_session_id,
+            oc.otp_hash,
+            oc.expires_at,
+            cs.session_code,
+            oc.attempt_count,
+            oc.max_attempts
+     from ${table("otp_challenges")} oc
+     join ${table("checkout_sessions")} cs on cs.id = oc.checkout_session_id
+     where oc.provider_request_ref = $1
+     order by oc.created_at desc
      limit 1`,
     [requestId],
   );
-  const row = result.rows[0];
   if (!row) throw new Error("otp_not_found");
-  if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) throw new Error("otp_expired");
-  if (String(code || "").trim() !== String(row.otp_code || "")) throw new Error("otp_invalid");
+  if (new Date(row.expires_at).getTime() < Date.now()) throw new Error("otp_expired");
 
-  await pool.query("update otp_requests set status = 'verified', verified_at = now() where id = $1", [row.id]);
-  await pool.query("update checkout_sessions set status = 'otp_verified', otp_verified_at = now(), updated_at = now() where id = $1", [row.checkout_session_id]);
-  return { ok: true as const, sessionId: row.session_code as string };
+  if (hashText(String(code || "").trim()) !== row.otp_hash) {
+    const nextAttempts = Number(row.attempt_count || 0) + 1;
+    await getPool().query(
+      `update ${table("otp_challenges")}
+       set attempt_count = $2,
+           status = case when $2 >= max_attempts then 'locked' else status end
+       where id = $1`,
+      [row.id, nextAttempts],
+    );
+    throw new Error("otp_invalid");
+  }
+
+  await getPool().query(
+    `update ${table("otp_challenges")}
+     set status = 'verified', verified_at = now(), attempt_count = attempt_count + 1
+     where id = $1`,
+    [row.id],
+  );
+  await getPool().query(
+    `update ${table("checkout_sessions")}
+     set current_step = 'risk_checks', status = 'otp_verified', otp_verified_at = now(), updated_at = now()
+     where id = $1`,
+    [row.checkout_session_id],
+  );
+  await createCheckoutSessionEvent(row.checkout_session_id, "otp.verified", null, { requestId });
+  return { ok: true as const, sessionId: row.session_code };
+}
+
+export async function confirmCheckoutDetails(input: ConfirmCheckoutDetailsInput) {
+  const session = await getCheckoutSessionByCode(input.sessionId);
+  if (!session) throw new Error("session_not_found");
+  if (!input.termsAccepted) throw new Error("terms_required");
+
+  const customer = await ensureCustomerByEmail(input.email, {
+    fullName: input.fullName,
+    idNumber: input.idNumber,
+    phone: input.phone,
+    address: input.address,
+    city: input.city,
+    province: input.province,
+    postalCode: input.postalCode,
+    geoLocation: input.geoLocation || "",
+  });
+  const addressId = await upsertDefaultAddress(customer.id, {
+    address1: input.address,
+    city: input.city,
+    province: input.province,
+    postalCode: input.postalCode,
+    latitude: input.latitude ?? null,
+    longitude: input.longitude ?? null,
+  });
+
+  const consent = await queryOne<{ id: string }>(
+    `insert into ${table("customer_consents")}
+      (customer_id, consent_type, consent_version, accepted, accepted_at, evidence)
+     values ($1,'terms_and_conditions','v1',true,now(),$2)
+     returning id`,
+    [customer.id, JSON.stringify({ geoLocation: input.geoLocation || "", latitude: input.latitude ?? null, longitude: input.longitude ?? null })],
+  );
+
+  const customerSnapshot = {
+    email: customer.email,
+    fullName: input.fullName,
+    idNumber: input.idNumber,
+    phone: input.phone,
+    address: input.address,
+    city: input.city,
+    province: input.province,
+    postalCode: input.postalCode,
+    geoLocation: input.geoLocation || "",
+    monthlyIncome: customer.monthlyIncome,
+    affordabilityBand: customer.affordabilityBand,
+  };
+
+  await getPool().query(
+    `update ${table("checkout_sessions")}
+     set customer_id = $2,
+         delivery_address_id = $3,
+         current_step = 'confirm_details',
+         status = 'otp_pending',
+         customer_snapshot = $4,
+         terms_consent_id = $5,
+         updated_at = now()
+     where session_code = $1`,
+    [input.sessionId, customer.id, addressId, JSON.stringify(customerSnapshot), consent?.id || null],
+  );
+  await createAuditEvent({
+    category: "checkout",
+    actorType: "customer",
+    actorId: customer.email,
+    customerId: customer.id,
+    checkoutSessionId: session.id,
+    resourceType: "checkout_session",
+    resourceId: session.id,
+    action: "checkout.details_confirmed",
+    metadata: customerSnapshot,
+  });
+  await createCheckoutSessionEvent(session.id, "checkout.details_confirmed", customer.email, customerSnapshot);
+
+  return { ok: true as const, sessionId: input.sessionId, customer: customerSnapshot };
+}
+
+export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
+  const session = await getCheckoutSessionByCode(input.sessionId);
+  if (!session) throw new Error("session_not_found");
+
+  const caseRow = await queryOne<{ id: string }>(
+    `insert into ${table("verification_cases")}
+      (checkout_session_id, customer_id, route, status)
+     values ($1,$2,$3,$4)
+     returning id`,
+    [
+      session.id,
+      session.customer_id,
+      input.screeningMode === "skip" ? "otp_only" : "full_kyc",
+      input.approved ? "approved" : "manual_review",
+    ],
+  );
+  if (!caseRow) throw new Error("verification_case_failed");
+
+  const score = input.screeningMode === "skip"
+    ? 18
+    : Math.max(
+        0,
+        Math.min(
+          200,
+          Math.round((input.transunionApproved ? 10 : 45) + input.fraudScore * 100 + (input.experianIncome < 15000 ? 30 : 10)),
+        ),
+      );
+  const decision = input.approved ? "auto_approve" : "manual_review";
+  const band = score < 40 ? "low" : score < 70 ? "medium" : score < 100 ? "high" : "critical";
+  const verificationStatus = input.approved ? (input.screeningMode === "skip" ? "otp_verified" : "kyc_and_id_verified") : "failed";
+
+  const assessment = await queryOne<{ id: string }>(
+    `insert into ${table("risk_assessments")}
+      (checkout_session_id, customer_id, assessment_version, score, decision, band, verification_status, requires_manual_review, ruleset_version, model_version, decision_reason, payload)
+     values ($1,$2,'v1',$3,$4,$5,$6,$7,'risk-rules-v1','pondo-demo-v1',$8,$9)
+     returning id`,
+    [
+      session.id,
+      session.customer_id,
+      score,
+      decision,
+      band,
+      verificationStatus,
+      !input.approved,
+      input.approved ? "Automated screening approved checkout." : "Screening requires manual analyst review.",
+      JSON.stringify({
+        saIdHash: hashText(input.saId),
+        bureau: input.bureau,
+        screeningMode: input.screeningMode,
+        transunionScore: input.transunionScore,
+        transunionApproved: input.transunionApproved,
+        experianIncome: input.experianIncome,
+        fraudScore: input.fraudScore,
+      }),
+    ],
+  );
+  if (!assessment) throw new Error("risk_assessment_failed");
+
+  const signals = [
+    { signalCode: "CREDIT_SCORE", source: input.bureau, points: input.transunionApproved ? 10 : 45, value: String(input.transunionScore ?? 0), detail: `Credit bureau ${input.bureau} score evaluated.` },
+    { signalCode: "KYC_IDENTITY", source: "pondo", points: input.kycIdentityVerified ? 5 : 40, value: input.kycIdentityVerified ? "verified" : "failed", detail: "Identity and KYC status captured." },
+    { signalCode: "AFFORDABILITY", source: "experian", points: input.experianIncome >= 15000 ? 10 : 30, value: String(input.experianIncome), detail: "Affordability income evaluation completed." },
+    { signalCode: "FRAUD_SCORE", source: "pondo-python", points: Math.round(input.fraudScore * 100), value: input.fraudScore.toFixed(2), detail: "Fraud scoring and geo-risk signal recorded." },
+  ];
+  for (const signal of signals) {
+    await getPool().query(
+      `insert into ${table("risk_signals")}
+        (risk_assessment_id, signal_code, source_system, points_assigned, signal_value, detail, evidence)
+       values ($1,$2,$3,$4,$5,$6,$7)`,
+      [assessment.id, signal.signalCode, signal.source, signal.points, signal.value, signal.detail, JSON.stringify({ city: input.city || "", province: input.province || "", postalCode: input.postalCode || "" })],
+    );
+  }
+
+  await getPool().query(
+    `insert into ${table("verification_steps")}
+      (verification_case_id, step_code, status, provider, provider_ref, completed_at)
+     values
+      ($1,'kyc',$2,'pondo','kyc-demo',now()),
+      ($1,'credit',$3,$4,'credit-demo',now()),
+      ($1,'affordability',$5,'experian','affordability-demo',now()),
+      ($1,'fraud',$6,'pondo-python','fraud-demo',now())`,
+    [
+      caseRow.id,
+      input.kycIdentityVerified ? "approved" : "declined",
+      input.transunionApproved ? "approved" : "declined",
+      input.bureau,
+      input.experianIncome >= 15000 ? "approved" : "declined",
+      input.fraudScore <= 0.08 ? "approved" : "declined",
+    ],
+  );
+
+  await getPool().query(
+    `insert into ${table("credit_checks")}
+      (verification_case_id, checkout_session_id, provider, bureau, score, tier, approved, response_payload)
+     values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [caseRow.id, session.id, input.bureau, input.bureau, input.transunionScore, input.transunionApproved ? "A" : "C", input.transunionApproved, JSON.stringify({ approved: input.transunionApproved, score: input.transunionScore })],
+  );
+  await getPool().query(
+    `insert into ${table("kyc_checks")}
+      (verification_case_id, checkout_session_id, provider, provider_ref, id_document_type, result_status, response_payload)
+     values ($1,$2,'pondo','kyc-demo','sa_id',$3,$4)`,
+    [caseRow.id, session.id, input.kycIdentityVerified ? "approved" : "declined", JSON.stringify({ identityVerified: input.kycIdentityVerified })],
+  );
+  await getPool().query(
+    `insert into ${table("affordability_checks")}
+      (verification_case_id, checkout_session_id, provider, declared_income_cents, verified_income_cents, approved, response_payload)
+     values ($1,$2,'experian',$3,$4,$5,$6)`,
+    [caseRow.id, session.id, Math.round(input.experianIncome * 100), Math.round(input.experianIncome * 100), input.experianIncome >= 15000, JSON.stringify({ monthlyIncome: input.experianIncome })],
+  );
+  await getPool().query(
+    `insert into ${table("fraud_checks")}
+      (verification_case_id, checkout_session_id, provider, fraud_score, result_status, response_payload)
+     values ($1,$2,'pondo-python',$3,$4,$5)`,
+    [caseRow.id, session.id, input.fraudScore, input.fraudScore <= 0.08 ? "approved" : "declined", JSON.stringify({ fraudScore: input.fraudScore, city: input.city || "", province: input.province || "" })],
+  );
+  if (!input.approved) {
+    await getPool().query(
+      `insert into ${table("manual_review_cases")}
+        (verification_case_id, queue_name, status, reason)
+       values ($1,'fraud-ops','open',$2)`,
+      [caseRow.id, "Automated risk checks require manual review."],
+    );
+  }
+
+  await getPool().query(
+    `update ${table("checkout_sessions")}
+     set current_step = 'risk_checks',
+         status = $2,
+         risk_completed_at = now(),
+         updated_at = now()
+     where id = $1`,
+    [session.id, input.approved ? "risk_approved" : "risk_failed"],
+  );
+
+  await createAuditEvent({
+    category: "risk",
+    actorType: "system",
+    actorId: input.actor,
+    customerId: session.customer_id,
+    checkoutSessionId: session.id,
+    resourceType: "risk_assessment",
+    resourceId: assessment.id,
+    action: "risk.assessed",
+    metadata: { decision, score, screeningMode: input.screeningMode },
+  });
+  await createCheckoutSessionEvent(session.id, "risk.assessed", input.actor, { decision, score });
+
+  return { ok: true as const, approved: input.approved };
 }
 
 export function simulateCredit(saId: string, bureau: "transunion" | "experian") {
@@ -325,18 +1201,17 @@ export function simulateCredit(saId: string, bureau: "transunion" | "experian") 
   return { score: 540, tier: "C", approved: false, bureau };
 }
 
-function discountedPrice(row: Record<string, unknown>) {
-  return Math.round(Number(row.price_cents || 0) * (1 - Number(row.discount_pct || 0) / 100));
-}
-
 export async function createOrder(input: {
   actor: string;
   customerEmail: string;
+  sessionId?: string;
   items: Array<{ productId: string; qty: number }>;
   delivery: { fullName: string; phone: string; address1: string; city: string; province: string; postalCode: string };
   paymentMethod: PaymentMethod;
 }) {
-  const pool = getPool();
+  const session = input.sessionId ? await getCheckoutSessionByCode(input.sessionId) : null;
+  if (input.sessionId && !session) throw new Error("session_not_found");
+
   const customer = await ensureCustomerByEmail(input.customerEmail, {
     fullName: input.delivery.fullName,
     phone: input.delivery.phone,
@@ -346,57 +1221,104 @@ export async function createOrder(input: {
     postalCode: input.delivery.postalCode,
   });
 
-  const products = await Promise.all(input.items.map((item) => getProductById(item.productId)));
-  if (products.some((item) => !item)) throw new Error("unknown_product");
-
-  const subtotal = input.items.reduce((sum, item, index) => {
-    return sum + discountedPrice(products[index] as Record<string, unknown>) * item.qty;
-  }, 0);
-
-  const orderId = crypto.randomUUID();
-  const transactionId = crypto.randomUUID();
-  const orderNumber = `ORD-${Date.now().toString().slice(-8)}`;
-  const qrPayload = signedQrPayload({
-    transactionId,
-    amountCents: subtotal,
-    currency: "ZAR",
-    customerId: customer.email,
+  const resolvedDelivery = deriveDeliveryLocation(input.delivery.address1, input.delivery.city, input.delivery.province, input.delivery.postalCode);
+  const addressId = await upsertDefaultAddress(customer.id, {
+    address1: input.delivery.address1,
+    city: resolvedDelivery.city,
+    province: resolvedDelivery.province,
+    postalCode: resolvedDelivery.postalCode,
   });
 
-  await pool.query(
-    `insert into orders
-      (id, order_number, customer_id, partner_code, delivery_snapshot, subtotal_cents, delivery_cents, total_cents, currency, status)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,'ZAR','created')`,
-    [orderId, orderNumber, customer.id, "amazon", JSON.stringify(input.delivery), subtotal, 0, subtotal],
+  const products = await Promise.all(input.items.map((item) => getProductBySku(item.productId)));
+  if (products.some((product) => !product)) throw new Error("unknown_product");
+  const resolvedProducts = products as ProductRecord[];
+  const subtotal = input.items.reduce((sum, item, index) => sum + discountedPrice(resolvedProducts[index]) * item.qty, 0);
+
+  const orderNumber = `ORD-${Date.now().toString().slice(-8)}`;
+  const orderRow = await queryOne<{ id: string }>(
+    `insert into ${table("orders")}
+      (checkout_session_id, customer_id, partner_id, delivery_address_id, order_number, subtotal_cents, delivery_cents, total_cents, currency, status)
+     values ($1,$2,$3,$4,$5,$6,0,$6,'ZAR','created')
+     returning id`,
+    [session?.id || null, customer.id, session?.partner_id || null, addressId, orderNumber, subtotal],
   );
+  if (!orderRow) throw new Error("order_create_failed");
 
   for (let index = 0; index < input.items.length; index += 1) {
-    const row = products[index] as Record<string, unknown>;
+    const product = resolvedProducts[index];
     const item = input.items[index];
-    const unit = discountedPrice(row);
-    await pool.query(
-      `insert into order_items
-        (order_id, product_id, product_name, brand, product_snapshot, quantity, unit_price_cents, discount_pct, line_total_cents)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [orderId, row.id, row.name, row.brand, JSON.stringify(row), item.qty, unit, Number(row.discount_pct || 0), unit * item.qty],
+    const unit = discountedPrice(product);
+    await getPool().query(
+      `insert into ${table("order_items")}
+        (order_id, product_id, sku, product_name, brand, product_snapshot, quantity, unit_price_cents, discount_pct, line_total_cents)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [orderRow.id, product.id, product.sku, product.name, product.brand, JSON.stringify(product), item.qty, unit, product.discountPct, unit * item.qty],
     );
   }
 
-  await pool.query(
-    `insert into transactions
-      (id, order_id, external_ref, customer_id, amount_cents, currency, payment_method, gateway, gateway_status, credit_tier, qr_payload, status)
-     values ($1,$2,$3,$4,$5,'ZAR',$6,$7,'initiated',null,$8,'initiated')`,
-    [transactionId, orderId, null, customer.email, subtotal, input.paymentMethod, paymentMethodMeta[input.paymentMethod].gateway, qrPayload],
+  await getPool().query(
+    `insert into ${table("order_status_history")}
+      (order_id, from_status, to_status, reason, changed_by)
+     values ($1,null,'created','Order created from checkout session',$2)`,
+    [orderRow.id, input.actor],
   );
 
-  await pool.query(
-    `insert into audit_entries (transaction_id, order_id, actor, action, data)
-     values ($1,$2,$3,'order.created',$4)`,
-    [transactionId, orderId, input.actor, JSON.stringify({ items: input.items, delivery: input.delivery, paymentMethod: input.paymentMethod })],
+  const paymentMethodRow = await getPaymentMethodRow(input.paymentMethod);
+  const paymentTransactionId = crypto.randomUUID();
+  await getPool().query(
+    `insert into ${table("payment_transactions")}
+      (id, order_id, checkout_session_id, customer_id, payment_method_id, gateway_code, amount_cents, currency, status, gateway_status)
+     values ($1,$2,$3,$4,$5,$6,$7,'ZAR','initiated','initiated')`,
+    [paymentTransactionId, orderRow.id, session?.id || null, customer.id, paymentMethodRow.id, paymentMethodRow.gateway_code, subtotal],
+  );
+  await getPool().query(
+    `insert into ${table("payment_events")}
+      (payment_transaction_id, event_type, raw_payload)
+     values ($1,'payment.initiated',$2)`,
+    [paymentTransactionId, JSON.stringify({ paymentMethod: input.paymentMethod, gateway: paymentMethodRow.gateway_code, amountCents: subtotal })],
   );
 
-  const tx = await pool.query("select * from transactions where id = $1", [transactionId]);
-  return { transaction: tx.rows[0], qrPayload };
+  if (session?.id) {
+    await getPool().query(
+      `update ${table("checkout_sessions")}
+       set current_step = 'payment', status = 'payment_pending', updated_at = now()
+       where id = $1`,
+      [session.id],
+    );
+    await createCheckoutSessionEvent(session.id, "order.created", input.actor, { orderId: orderRow.id, paymentTransactionId });
+  }
+
+  await createAuditEvent({
+    category: "payment",
+    actorType: "customer",
+    actorId: input.actor,
+    customerId: customer.id,
+    checkoutSessionId: session?.id || null,
+    orderId: orderRow.id,
+    paymentTransactionId,
+    resourceType: "payment_transaction",
+    resourceId: paymentTransactionId,
+    action: "order.created",
+    metadata: { paymentMethod: input.paymentMethod, subtotal },
+  });
+
+  const mapped = await mapTransaction({
+    id: paymentTransactionId,
+    customer_id: customer.id,
+    amount_cents: subtotal,
+    currency: "ZAR",
+    payment_method_code: input.paymentMethod,
+    gateway_code: paymentMethodRow.gateway_code,
+    gateway_status: "initiated",
+    status: "initiated",
+    created_at: nowIso(),
+    updated_at: nowIso(),
+    reconciled_at: null,
+    settled_at: null,
+    external_ref: null,
+  });
+
+  return { transaction: mapped, qrPayload: mapped.qr_payload };
 }
 
 export async function settleOrder(input: {
@@ -407,108 +1329,192 @@ export async function settleOrder(input: {
   notifyEmail?: string;
   notifyChannels?: Array<"sms" | "email">;
 }) {
-  const pool = getPool();
-  const txResult = await pool.query("select * from transactions where id = $1 limit 1", [input.id]);
-  const tx = txResult.rows[0];
-  if (!tx) throw new Error("not_found");
+  const transaction = await getPaymentTransactionById(input.id);
+  if (!transaction) throw new Error("not_found");
 
-  const gateway = paymentMethodMeta[input.paymentMethod].gateway;
-  const creditEligible = !paymentMethodMeta[input.paymentMethod].requiresCreditVet || ["A", "B"].includes(String(tx.credit_tier || "A"));
-  if (!creditEligible) {
-    await pool.query("update transactions set payment_method = $2, gateway = $3, gateway_status = 'declined', status = 'failed', updated_at = now() where id = $1", [input.id, input.paymentMethod, gateway]);
-    throw new Error("payment_declined");
-  }
+  const paymentMethodRow = await getPaymentMethodRow(input.paymentMethod);
+  const risk = transaction.checkout_session_id ? await getLatestRiskAssessment(transaction.checkout_session_id) : null;
+  const creditEligible = !paymentMethodMeta[input.paymentMethod].requiresCreditVet || risk?.decision === "auto_approve";
+  if (!creditEligible) throw new Error("payment_declined");
 
-  await pool.query(
-    `update transactions
-     set payment_method = $2, gateway = $3, gateway_status = 'settled', status = 'reconciled',
-         external_ref = $4, reconciled_at = now(), settled_at = now(), updated_at = now()
+  const externalRef = `live_${transaction.id.slice(0, 8)}`;
+  await getPool().query(
+    `update ${table("payment_transactions")}
+     set status = 'reconciled',
+         gateway_status = 'settled',
+         payment_method_id = $2,
+         gateway_code = $3,
+         external_ref = $4,
+         reconciled_at = now(),
+         settled_at = now(),
+         updated_at = now()
      where id = $1`,
-    [input.id, input.paymentMethod, gateway, `live_${String(input.id).slice(0, 8)}`],
+    [transaction.id, paymentMethodRow.id, paymentMethodRow.gateway_code, externalRef],
+  );
+  await getPool().query(
+    `insert into ${table("payment_events")}
+      (payment_transaction_id, event_type, gateway_ref, raw_payload)
+     values ($1,'payment.settled',$2,$3)`,
+    [transaction.id, externalRef, JSON.stringify({ settlementBank: input.settlementBank || "absa" })],
   );
 
-  const safeBank = bankAccounts[input.settlementBank || "absa"] ? (input.settlementBank || "absa") : "absa";
-  const bank = bankAccounts[safeBank];
-  await pool.query(
-    `insert into payment_settlements
-      (transaction_id, settlement_bank, bank_label, account_ref, amount_cents, currency, settled_at)
-     values ($1,$2,$3,$4,$5,'ZAR',now())`,
-    [input.id, safeBank, bank.bankLabel, bank.accountRef, tx.amount_cents],
+  const bankKey = bankAccounts[input.settlementBank || "absa"] ? (input.settlementBank || "absa") : "absa";
+  const bank = bankAccounts[bankKey];
+  await getPool().query(
+    `insert into ${table("payment_settlements")}
+      (payment_transaction_id, settlement_bank, bank_account_ref, gross_amount_cents, fee_amount_cents, net_amount_cents, currency, settled_at)
+     values ($1,$2,$3,$4,0,$4,'ZAR',now())
+     on conflict (payment_transaction_id) do update
+       set settlement_bank = excluded.settlement_bank,
+           bank_account_ref = excluded.bank_account_ref,
+           gross_amount_cents = excluded.gross_amount_cents,
+           net_amount_cents = excluded.net_amount_cents,
+           currency = excluded.currency,
+           settled_at = excluded.settled_at`,
+    [transaction.id, bankKey, bank.accountRef, Number(transaction.amount_cents)],
   );
 
+  const email = await getPrimaryEmail(transaction.customer_id);
+  const phone = await getPrimaryPhone(transaction.customer_id);
+  const notificationsOut: Array<{ channel: "sms" | "email"; destination: string; status: string; sentAt: string; message: string }> = [];
   for (const channel of input.notifyChannels || ["sms", "email"]) {
-    await pool.query(
-      `insert into payment_notifications (transaction_id, channel, destination, status, message)
-       values ($1,$2,$3,'sent',$4)`,
+    const destination = channel === "email" ? input.notifyEmail || email : phone;
+    const notification = await queryOne<{ id: string; created_at: string }>(
+      `insert into ${table("notifications")}
+        (customer_id, order_id, payment_transaction_id, channel, template_code, destination_hash, status, message_subject, message_body_redacted)
+       values ($1,$2,$3,$4,'payment_settled',$5,'sent',$6,$7)
+       returning id, created_at`,
       [
-        input.id,
+        transaction.customer_id,
+        transaction.order_id,
+        transaction.id,
         channel,
-        channel === "email" ? input.notifyEmail || "customer@example.com" : "+27XXXXXXXXX",
+        hashText(destination.toLowerCase()),
+        "Settlement confirmed",
         `Funds settled into ${bank.bankLabel} (${bank.accountRef}).`,
       ],
     );
-  }
-
-  const existingProcess = await pool.query("select * from delivery_processes where transaction_id = $1 limit 1", [input.id]);
-  if (!existingProcess.rows[0]) {
-    await pool.query(
-      `insert into delivery_processes (order_id, transaction_id, status, progress_pct, active_step, started_at, updated_at)
-       values ($1,$2,'active',0,1,now(),now())`,
-      [tx.order_id, input.id],
-    );
-    const process = await pool.query("select id from delivery_processes where transaction_id = $1 limit 1", [input.id]);
-    for (let index = 0; index < deliverySteps.length; index += 1) {
-      const step = deliverySteps[index];
-      await pool.query(
-        `insert into delivery_process_steps (delivery_process_id, step_index, title, detail, status)
-         values ($1,$2,$3,$4,$5)`,
-        [process.rows[0].id, index + 1, step.title, step.detail, index === 0 ? "active" : "pending"],
+    if (notification) {
+      await getPool().query(
+        `insert into ${table("notification_attempts")}
+          (notification_id, provider, provider_ref, attempt_no, status, response_payload)
+         values ($1,$2,$3,1,'sent',$4)`,
+        [notification.id, channel === "email" ? "ses-demo" : "twilio-demo", randomCode("notify"), JSON.stringify({ destination: maskDestination(channel, destination) })],
       );
+      notificationsOut.push({
+        channel,
+        destination: maskDestination(channel, destination),
+        status: "sent",
+        sentAt: notification.created_at,
+        message: `Funds settled into ${bank.bankLabel} (${bank.accountRef}).`,
+      });
     }
   }
 
-  await pool.query(
-    `insert into audit_entries (transaction_id, order_id, actor, action, data)
-     values ($1,$2,$3,'payment.settled',$4)`,
-    [input.id, tx.order_id, input.actor, JSON.stringify({ paymentMethod: input.paymentMethod, gateway, settlementBank: safeBank })],
+  await getPool().query(
+    `update ${table("orders")}
+     set status = 'paid', updated_at = now()
+     where id = $1`,
+    [transaction.order_id],
+  );
+  await getPool().query(
+    `insert into ${table("order_status_history")}
+      (order_id, from_status, to_status, reason, changed_by)
+     values ($1,'created','paid','Payment settlement completed',$2)`,
+    [transaction.order_id, input.actor],
   );
 
-  const updatedTx = await pool.query("select * from transactions where id = $1", [input.id]);
-  const settlement = await pool.query("select * from payment_settlements where transaction_id = $1 order by created_at desc limit 1", [input.id]);
-  const notifications = await pool.query("select * from payment_notifications where transaction_id = $1 order by sent_at asc", [input.id]);
-  const notificationRows = notifications.rows as any[];
+  const existingProcess = await queryOne<{ id: string }>(
+    `select id from ${table("delivery_processes")} where payment_transaction_id = $1 limit 1`,
+    [transaction.id],
+  );
+  let processId = existingProcess?.id || null;
+  if (!processId) {
+    const created = await queryOne<{ id: string }>(
+      `insert into ${table("delivery_processes")}
+        (order_id, payment_transaction_id, status, progress_pct, active_step, started_at, updated_at)
+       values ($1,$2,'active',0,1,now(),now())
+       returning id`,
+      [transaction.order_id, transaction.id],
+    );
+    processId = created?.id || null;
+    if (processId) {
+      for (let index = 0; index < deliverySteps.length; index += 1) {
+        const step = deliverySteps[index];
+        await getPool().query(
+          `insert into ${table("delivery_process_steps")}
+            (delivery_process_id, step_index, step_code, title, detail, status)
+           values ($1,$2,$3,$4,$5,$6)`,
+          [processId, index + 1, step.code, step.title, step.detail, index === 0 ? "active" : "pending"],
+        );
+      }
+    }
+  }
+
+  if (transaction.checkout_session_id) {
+    await getPool().query(
+      `update ${table("checkout_sessions")}
+       set current_step = 'delivery_tracking',
+           status = 'paid',
+           payment_completed_at = now(),
+           updated_at = now()
+       where id = $1`,
+      [transaction.checkout_session_id],
+    );
+    await createCheckoutSessionEvent(transaction.checkout_session_id, "payment.settled", input.actor, { paymentTransactionId: transaction.id });
+  }
+
+  await createAuditEvent({
+    category: "payment",
+    actorType: "customer",
+    actorId: input.actor,
+    customerId: transaction.customer_id,
+    checkoutSessionId: transaction.checkout_session_id,
+    orderId: transaction.order_id,
+    paymentTransactionId: transaction.id,
+    resourceType: "payment_transaction",
+    resourceId: transaction.id,
+    action: "payment.settled",
+    metadata: { settlementBank: bankKey, gateway: paymentMethodRow.gateway_code },
+  });
+
+  const updated = await getPaymentTransactionById(transaction.id);
+  if (!updated) throw new Error("payment_fetch_failed");
+  const mapped = await mapTransaction(updated);
   return {
-    transaction: updatedTx.rows[0],
+    transaction: mapped,
     settlement: {
-      bank: safeBank,
-      bankLabel: settlement.rows[0].bank_label,
-      accountRef: settlement.rows[0].account_ref,
-      settledAt: settlement.rows[0].settled_at,
-      amountCents: settlement.rows[0].amount_cents,
-      currency: settlement.rows[0].currency,
+      bank: bankKey,
+      bankLabel: bank.bankLabel,
+      accountRef: bank.accountRef,
+      settledAt: updated.settled_at,
+      amountCents: Number(updated.amount_cents),
+      currency: updated.currency,
     },
-    notifications: notificationRows.map((row: any) => ({
-      channel: row.channel,
-      destination: row.destination,
-      status: row.status,
-      sentAt: row.sent_at,
-      message: row.message,
-    })),
+    notifications: notificationsOut,
   };
 }
 
 export async function getOrder(id: string) {
-  const pool = getPool();
-  const txResult = await pool.query("select * from transactions where id = $1 limit 1", [id]);
-  const tx = txResult.rows[0];
-  if (!tx) return null;
-  const order = tx.order_id ? await pool.query("select * from orders where id = $1 limit 1", [tx.order_id]) : { rows: [] };
-  const items = tx.order_id ? await pool.query("select * from order_items where order_id = $1 order by created_at asc", [tx.order_id]) : { rows: [] };
-  const audit = await pool.query("select at, actor, action, data from audit_entries where transaction_id = $1 order by at asc, id asc", [id]);
+  const transaction = await getPaymentTransactionById(id);
+  if (!transaction) return null;
+
+  const [order, items, audit] = await Promise.all([
+    queryOne<Record<string, unknown>>(`select * from ${table("orders")} where id = $1 limit 1`, [transaction.order_id]),
+    getPool().query(`select * from ${table("order_items")} where order_id = $1 order by id asc`, [transaction.order_id]),
+    getPool().query<{ at: string; actor: string | null; action: string; data: unknown }>(
+      `select occurred_at as at, actor_id as actor, action, metadata as data
+       from ${table("audit_events")}
+       where payment_transaction_id = $1
+       order by occurred_at asc, id asc`,
+      [transaction.id],
+    ),
+  ]);
+
   return {
-    transaction: tx,
+    transaction: await mapTransaction(transaction),
     details: {
-      order: order.rows[0] || null,
+      order,
       items: items.rows,
     },
     audit: audit.rows,
@@ -516,11 +1522,23 @@ export async function getOrder(id: string) {
 }
 
 export async function getDeliveryProcess(id: string) {
-  const pool = getPool();
-  const processResult = await pool.query("select * from delivery_processes where transaction_id = $1 limit 1", [id]);
-  const process = processResult.rows[0];
+  const process = await queryOne<{ id: string; started_at: string | Date | null }>(
+    `select id, started_at
+     from ${table("delivery_processes")}
+     where payment_transaction_id = $1
+     limit 1`,
+    [id],
+  );
   if (!process) return null;
-  const stepsResult = await pool.query("select * from delivery_process_steps where delivery_process_id = $1 order by step_index asc", [process.id]);
+
+  const stepsResult = await getPool().query<{ step_index: number; title: string; detail: string }>(
+    `select step_index, title, detail
+     from ${table("delivery_process_steps")}
+     where delivery_process_id = $1
+     order by step_index asc`,
+    [process.id],
+  );
+
   const startedAtMs = process.started_at ? new Date(process.started_at).getTime() : Date.now();
   const stepDurationMs = 6000;
   const totalSteps = stepsResult.rows.length || deliverySteps.length;
@@ -530,8 +1548,7 @@ export async function getDeliveryProcess(id: string) {
   const activeStep = completed ? null : Math.min(totalSteps, Math.floor(elapsedMs / stepDurationMs) + 1);
   const progressPct = Math.max(0, Math.min(100, Math.round((elapsedMs / maxDurationMs) * 100)));
 
-  const stepRows = stepsResult.rows as any[];
-  const steps = stepRows.map((row: any, index: number) => {
+  const steps = stepsResult.rows.map((row, index) => {
     const stepStart = startedAtMs + index * stepDurationMs;
     const stepEnd = stepStart + stepDurationMs;
     const done = Date.now() >= stepEnd;
@@ -557,22 +1574,53 @@ export async function getDeliveryProcess(id: string) {
 }
 
 export async function sponsorSummary() {
-  const pool = getPool();
-  const result = await pool.query("select status, amount_cents from transactions");
-  const items = result.rows as any[];
+  const result = await getPool().query<{ status: string; amount_cents: number }>(
+    `select status, amount_cents from ${table("payment_transactions")}`,
+  );
+  const items = result.rows;
   return {
     live: items.length,
-    completed: items.filter((row: any) => row.status === "reconciled").length,
-    failed: items.filter((row: any) => row.status === "failed").length,
-    processing: items.filter((row: any) => row.status === "processing" || row.status === "initiated").length,
-    grossCents: items.filter((row: any) => row.status === "reconciled").reduce((sum: number, row: any) => sum + Number(row.amount_cents || 0), 0),
+    completed: items.filter((row) => row.status === "reconciled").length,
+    failed: items.filter((row) => row.status === "failed").length,
+    processing: items.filter((row) => row.status === "processing" || row.status === "initiated" || row.status === "authorized").length,
+    grossCents: items.filter((row) => row.status === "reconciled").reduce((sum, row) => sum + Number(row.amount_cents || 0), 0),
   };
 }
 
 export async function sponsorOrders() {
-  const pool = getPool();
-  const result = await pool.query("select * from transactions order by created_at desc");
-  return {
-    items: result.rows,
-  };
+  const rows = await getPool().query<{
+    id: string;
+    customer_id: string;
+    amount_cents: number;
+    currency: string;
+    status: string;
+    gateway_code: string;
+    gateway_status: string;
+    reconciled_at: string | null;
+    settled_at: string | null;
+    created_at: string;
+    updated_at: string;
+    external_ref: string | null;
+    payment_method_code: PaymentMethod;
+  }>(
+    `select pt.id,
+            pt.customer_id,
+            pt.amount_cents,
+            pt.currency,
+            pt.status,
+            pt.gateway_code,
+            pt.gateway_status,
+            pt.reconciled_at,
+            pt.settled_at,
+            pt.created_at,
+            pt.updated_at,
+            pt.external_ref,
+            pm.code as payment_method_code
+     from ${table("payment_transactions")} pt
+     join ${table("payment_methods")} pm on pm.id = pt.payment_method_id
+     order by pt.created_at desc`,
+  );
+
+  const items = await Promise.all(rows.rows.map((row) => mapTransaction(row)));
+  return { items };
 }

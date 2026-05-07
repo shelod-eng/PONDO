@@ -110,6 +110,32 @@ export type PartnerBootstrapSession = {
   };
 };
 
+export type AddressSuggestion = {
+  placeId: string;
+  text: string;
+  mainText: string;
+  secondaryText: string;
+};
+
+export type GoogleResolvedAddress = {
+  formattedAddress: string;
+  city: string;
+  province: string;
+  postalCode: string;
+  placeId: string;
+  latitude: number | null;
+  longitude: number | null;
+};
+
+export type AddressValidationResult = GoogleResolvedAddress & {
+  verdict: "validated" | "needs_confirmation";
+  addressComplete: boolean;
+  hasInferredComponents: boolean;
+  hasReplacedComponents: boolean;
+  hasUnconfirmedComponents: boolean;
+  possibleNextAction: string;
+};
+
 const configuredApiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 const API_BASE_URLS = Array.from(new Set([configuredApiBase, "", "http://localhost:4100", "http://localhost:4000"].filter((value) => value !== undefined))) as string[];
 const API_BASE_URL = API_BASE_URLS[0];
@@ -257,7 +283,7 @@ export async function simulateDemoCredit(input: { saId: string; bureau: "transun
 
 export async function createDemoOrder(
   token: string,
-  input: { customerId: string; items: Array<{ productId: string; qty: number }>; delivery: DeliveryDetails; paymentMethod: PaymentMethod },
+  input: { customerId: string; sessionId?: string; items: Array<{ productId: string; qty: number }>; delivery: DeliveryDetails; paymentMethod: PaymentMethod },
 ) {
   return apiFetch<{ transaction: Transaction; qrPayload: string }>("/api/pondo/orders", { method: "POST", token, body: JSON.stringify(input) });
 }
@@ -344,6 +370,77 @@ export async function sendOtp(input: { sessionId: string; channel: "sms" | "emai
 
 export async function verifyOtp(input: { requestId: string; code: string }) {
   return apiFetch<{ ok: true; sessionId: string }>("/api/pondo/verify-otp", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function confirmPondoCheckoutDetails(
+  input: {
+    sessionId: string;
+    email: string;
+    fullName: string;
+    idNumber: string;
+    phone: string;
+    address: string;
+    city: string;
+    province: string;
+    postalCode: string;
+    geoLocation?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    termsAccepted: true;
+  },
+) {
+  const { sessionId, ...body } = input;
+  return apiFetch<{ ok: true; sessionId: string }>(`/api/pondo/checkout-sessions/${encodeURIComponent(sessionId)}/confirm-details`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function persistPondoRiskAssessment(
+  token: string,
+  input: {
+    sessionId: string;
+    saId: string;
+    bureau: "transunion" | "experian";
+    screeningMode: "full" | "skip";
+    transunionScore: number | null;
+    transunionApproved: boolean;
+    kycIdentityVerified: boolean;
+    experianIncome: number;
+    fraudScore: number;
+    approved: boolean;
+    city?: string;
+    province?: string;
+    postalCode?: string;
+  },
+) {
+  const { sessionId, ...body } = input;
+  return apiFetch<{ ok: true; approved: boolean }>(`/api/pondo/checkout-sessions/${encodeURIComponent(sessionId)}/risk-checks`, {
+    method: "POST",
+    token,
+    body: JSON.stringify(body),
+  });
+}
+
+export async function autocompleteAddress(input: { input: string; sessionToken?: string }) {
+  return apiFetch<{ suggestions: AddressSuggestion[] }>("/api/pondo/address/autocomplete", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getPlaceAddress(input: { placeId: string; sessionToken?: string }) {
+  return apiFetch<{ place: GoogleResolvedAddress }>("/api/pondo/address/place", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function validateCheckoutAddress(input: { address: string; sessionToken?: string }) {
+  return apiFetch<{ validation: AddressValidationResult }>("/api/pondo/address/validate", {
     method: "POST",
     body: JSON.stringify(input),
   });
