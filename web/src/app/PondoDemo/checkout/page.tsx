@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -11,7 +11,6 @@ import {
   fetchPartnerCart,
   getPlaceAddress,
   login,
-  payDemoOrder,
   persistPondoRiskAssessment,
   sendOtp,
   simulateDemoCredit,
@@ -21,6 +20,8 @@ import {
   type PaymentSettlement,
   type PartnerBootstrapSession,
   type PartnerName,
+  type RiskAssessment,
+  type Transaction,
   type GoogleResolvedAddress,
   validateCheckoutAddress,
   verifyOtp,
@@ -67,39 +68,39 @@ type VetResult = {
 const DEMO_CUSTOMER_PROFILES: DemoCustomerProfile[] = [
   {
     email: "thabo@email.com",
-    label: "thabo@email.com (Thabo Nkosi - Male Profile: High Risk Checks)",
+    label: "thabo@email.com (Thabo Nkosi)",
     screeningMode: "full",
-    note: "Male profile requires KYC, credit, affordability, fraud, and geolocation review.",
+    note: "Existing profile loaded. Final verification path now comes from South African ID, age, sex, and geo-risk scoring.",
   },
   {
     email: "sipho@email.com",
-    label: "sipho@email.com (Sipho Molefe - Male Profile: High Risk Checks)",
+    label: "sipho@email.com (Sipho Molefe)",
     screeningMode: "full",
-    note: "Male profile requires KYC, credit, affordability, fraud, and geolocation review.",
+    note: "Existing profile loaded. Final verification path now comes from South African ID, age, sex, and geo-risk scoring.",
   },
   {
     email: "mandla@email.com",
-    label: "mandla@email.com (Mandla Khumalo - Male Profile: High Risk Checks)",
+    label: "mandla@email.com (Mandla Khumalo)",
     screeningMode: "full",
-    note: "Male profile requires KYC, credit, affordability, fraud, and geolocation review.",
+    note: "Existing profile loaded. Final verification path now comes from South African ID, age, sex, and geo-risk scoring.",
   },
   {
     email: "amara@email.com",
-    label: "amara@email.com (Amara Naidoo - Female Profile: No Background Checks)",
+    label: "amara@email.com (Amara Naidoo)",
     screeningMode: "skip",
-    note: "Female profile is configured for direct progression after OTP verification.",
+    note: "Existing profile loaded. Final verification path now comes from South African ID, age, sex, and geo-risk scoring.",
   },
   {
     email: "naledi@email.com",
-    label: "naledi@email.com (Naledi Dlamini - Female Profile: No Background Checks)",
+    label: "naledi@email.com (Naledi Dlamini)",
     screeningMode: "skip",
-    note: "Female profile is configured for direct progression after OTP verification.",
+    note: "Existing profile loaded. Final verification path now comes from South African ID, age, sex, and geo-risk scoring.",
   },
   {
     email: "gogo@email.com",
-    label: "gogo@email.com (Gogo Mokoena - Elderly Citizen: No Background Checks)",
+    label: "gogo@email.com (Gogo Mokoena)",
     screeningMode: "skip",
-    note: "Elderly citizen profile is configured for direct progression after OTP verification.",
+    note: "Existing profile loaded. Final verification path now comes from South African ID, age, sex, and geo-risk scoring.",
   },
 ];
 
@@ -107,6 +108,113 @@ const DELIVERY_TIME_SLOTS = [
   { id: "09:00-11:00", label: "09:00 - 11:00" },
   { id: "12:00-15:00", label: "12:00 - 15:00" },
 ] as const;
+
+const CHECKOUT_PROVINCE_ALIASES: Record<string, string> = {
+  gp: "gauteng",
+  gauteng: "gauteng",
+  kzn: "kwazulu-natal",
+  "kwa-zulu natal": "kwazulu-natal",
+  "kwazulu natal": "kwazulu-natal",
+  "kwazulu-natal": "kwazulu-natal",
+  wc: "western cape",
+  "western cape": "western cape",
+  ec: "eastern cape",
+  "eastern cape": "eastern cape",
+  fs: "free state",
+  "free state": "free state",
+  lp: "limpopo",
+  limpopo: "limpopo",
+  mp: "mpumalanga",
+  mpumalanga: "mpumalanga",
+  nc: "northern cape",
+  "northern cape": "northern cape",
+  nw: "north west",
+  "north west": "north west",
+};
+
+const CHECKOUT_HIGH_RISK_ZONES = new Set([
+  "durban|kwazulu-natal",
+  "durban central|kwazulu-natal",
+  "hillbrow|gauteng",
+  "johannesburg cbd|gauteng",
+  "alexandra|gauteng",
+]);
+
+function normalizeRiskText(value: string | undefined) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeRiskProvince(value: string | undefined) {
+  const normalized = normalizeRiskText(value).replace(/\./g, "");
+  return CHECKOUT_PROVINCE_ALIASES[normalized] || normalized;
+}
+
+function computeProjectedRisk(input: {
+  clientGeo: GeoLocation | null;
+  city: string;
+  province: string;
+  amountCents: number;
+  deviceFingerprint: string;
+  idNumber: string;
+}) {
+  let score = 0;
+  const idRisk = deriveSouthAfricanIdRisk(input.idNumber);
+  const geoFactors: string[] = [];
+  const ipProvince = normalizeRiskProvince(input.clientGeo?.province);
+  const ipCity = normalizeRiskText(input.clientGeo?.city);
+  const deliveryProvince = normalizeRiskProvince(input.province);
+  const deliveryCity = normalizeRiskText(input.city);
+  const provinceMatches = ipProvince && deliveryProvince && ipProvince === deliveryProvince;
+  const cityMatches = ipCity && deliveryCity && ipCity === deliveryCity;
+  const ipMismatch = Boolean((ipProvince || ipCity) && (deliveryProvince || deliveryCity) && !provinceMatches && !cityMatches);
+  if (idRisk && !idRisk.rejected) {
+    score += idRisk.ageScore + idRisk.genderScore;
+  }
+  if (ipMismatch) {
+    score += 40;
+    geoFactors.push("IP mismatch +40");
+  }
+  const highRiskZone = CHECKOUT_HIGH_RISK_ZONES.has(`${deliveryCity}|${deliveryProvince}`);
+  if (highRiskZone) {
+    score += 30;
+    geoFactors.push("High-risk zone +30");
+  }
+  const highValue = input.amountCents > 1_000_000;
+  if (highValue) {
+    score += 20;
+    geoFactors.push("High-value order +20");
+  }
+  const fingerprintPresent = Boolean(input.deviceFingerprint);
+  if (!fingerprintPresent) {
+    score += 10;
+    geoFactors.push("Missing device fingerprint +10");
+  }
+  const nonSouthAfricanIp = Boolean(input.clientGeo?.country) && normalizeRiskText(input.clientGeo?.country) !== "south africa";
+  if (nonSouthAfricanIp) {
+    score += 25;
+    geoFactors.push("Non-SA IP +25");
+  }
+
+  return {
+    score,
+    ipMismatch,
+    highRiskZone,
+    highValue,
+    nonSouthAfricanIp,
+    idRisk,
+    geoFactors,
+    decision: score > 70 ? "manual_review_hold" : score >= 41 ? "elevated_verification" : "auto_approve",
+  } as const;
+}
+
+function riskDecisionLabel(decision: RiskAssessment["decision"] | ReturnType<typeof computeProjectedRisk>["decision"]) {
+  if (decision === "manual_review_hold") return "Manual Review Required";
+  if (decision === "elevated_verification") return "Elevated Verification";
+  return "Auto-Approve";
+}
 
 function money(cents: number) {
   return new Intl.NumberFormat("en-ZA", {
@@ -156,6 +264,7 @@ function minDeliveryDateValue() {
 function formatDeliveryDateLabel(value: string) {
   if (!value) return "";
   const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return value;
   return new Intl.DateTimeFormat("en-ZA", {
     weekday: "long",
     day: "2-digit",
@@ -252,7 +361,10 @@ export default function PondoCheckoutPage() {
 
   const [vetResult, setVetResult] = useState<VetResult | null>(null);
   const [paymentSettlement, setPaymentSettlement] = useState<PaymentSettlement | null>(null);
+  const [completedTransaction, setCompletedTransaction] = useState<Transaction | null>(null);
+  const [completedRiskAssessment, setCompletedRiskAssessment] = useState<RiskAssessment | null>(null);
   const [completedOrderId, setCompletedOrderId] = useState("");
+  const [kycReadyToConfirm, setKycReadyToConfirm] = useState(false);
   const [catalog, setCatalog] = useState<DemoProduct[]>(FALLBACK_PRODUCTS);
   const [clientGeo, setClientGeo] = useState<GeoLocation | null>(null);
   const [deviceFingerprint, setDeviceFingerprint] = useState("");
@@ -260,14 +372,14 @@ export default function PondoCheckoutPage() {
 
   const customer = session?.customer || null;
   const cartCount = cart.count;
-  const selectedProfile = useMemo(
-    () => DEMO_CUSTOMER_PROFILES.find((profile) => profile.email === email) || DEMO_CUSTOMER_PROFILES[0],
-    [email],
-  );
   const minimumDeliveryDate = useMemo(() => minDeliveryDateValue(), []);
   const selectedDeliverySlot = useMemo(
     () => DELIVERY_TIME_SLOTS.find((slot) => slot.id === deliveryWindow) || null,
     [deliveryWindow],
+  );
+  const selectedProfile = useMemo(
+    () => DEMO_CUSTOMER_PROFILES.find((profile) => profile.email === email) || DEMO_CUSTOMER_PROFILES[0],
+    [email],
   );
   const selectedPaymentMethod: PaymentMethod = "card";
   const selectedPaymentMethodMeta = useMemo(
@@ -290,11 +402,13 @@ export default function PondoCheckoutPage() {
   }, []);
 
   useEffect(() => {
-    if (!session?.customer) return;
-
     createDeviceFingerprint()
       .then((fingerprint) => setDeviceFingerprint(fingerprint))
       .catch(() => setDeviceFingerprint(""));
+  }, []);
+
+  useEffect(() => {
+    if (!session?.customer) return;
 
     setCapturedFullName(session.customer.fullName);
     setCapturedIdNumber(session.customer.idNumber);
@@ -313,10 +427,6 @@ export default function PondoCheckoutPage() {
       .then((geo) => {
         if (geo) {
           setClientGeo(geo);
-          setCapturedCity(geo.city);
-          setCapturedProvince(geo.province);
-          setCapturedPostalCode(geo.postalCode);
-          setCapturedAddress(formatCombinedAddress(session.customer.address, geo.city, geo.province, geo.postalCode));
         }
         log(`Geolocation detected: ${geo?.city}, ${geo?.province}`);
       })
@@ -387,8 +497,23 @@ export default function PondoCheckoutPage() {
   const normalizedIdNumber = capturedIdNumber.replace(/\D/g, "");
   const saidDetails = useMemo(() => parseSouthAfricanId(normalizedIdNumber), [normalizedIdNumber]);
   const saidRisk = useMemo(() => deriveSouthAfricanIdRisk(normalizedIdNumber), [normalizedIdNumber]);
+  const projectedRisk = useMemo(
+    () =>
+      computeProjectedRisk({
+        clientGeo,
+        city: addressValidation?.city || capturedCity,
+        province: addressValidation?.province || capturedProvince,
+        amountCents: cartSubtotalCents,
+        deviceFingerprint,
+        idNumber: normalizedIdNumber,
+      }),
+    [addressValidation?.city, addressValidation?.province, capturedCity, capturedProvince, cartSubtotalCents, clientGeo, deviceFingerprint, normalizedIdNumber],
+  );
+  const requiresEnhancedRiskChecks = projectedRisk.decision !== "auto_approve";
+  const requiresKycPipelineView = projectedRisk.decision !== "auto_approve";
   const isSaidComplete = normalizedIdNumber.length === 13;
   const isSaidValid = isSaidComplete && validateSAID(normalizedIdNumber);
+  const isUnderAge = Boolean(saidRisk?.rejected);
   const showSaidFeedback = saidBlurred;
 
   const primaryCtaClass =
@@ -425,7 +550,10 @@ export default function PondoCheckoutPage() {
       setTermsAccepted(false);
       setVetResult(null);
       setPaymentSettlement(null);
+      setCompletedTransaction(null);
+      setCompletedRiskAssessment(null);
       setCompletedOrderId("");
+      setKycReadyToConfirm(false);
       setDeliveryDate("");
       setDeliveryWindow("");
       setProcessingMessage("");
@@ -509,6 +637,10 @@ export default function PondoCheckoutPage() {
       setSaidBlurred(true);
       throw new Error("Enter a valid 13-digit South African ID number before requesting OTP.");
     }
+    if (isUnderAge) {
+      setSaidBlurred(true);
+      throw new Error("Customers under 18 cannot place orders on the PONDO platform.");
+    }
 
     const out = await sendOtp({
       sessionId: session.sessionId,
@@ -532,8 +664,9 @@ export default function PondoCheckoutPage() {
       setError("Please enter a valid South African ID number before proceeding.");
       return;
     }
-    if (!termsAccepted) {
-      setError("Please accept Terms & Conditions before proceeding.");
+    if (isUnderAge) {
+      setSaidBlurred(true);
+      setError("Customers under 18 cannot place orders on the PONDO platform.");
       return;
     }
     if (!deliveryDate) {
@@ -546,6 +679,10 @@ export default function PondoCheckoutPage() {
     }
     if (!deliveryWindow) {
       setError("Please choose a delivery time slot before proceeding.");
+      return;
+    }
+    if (!termsAccepted) {
+      setError("Please accept Terms & Conditions before proceeding.");
       return;
     }
 
@@ -585,7 +722,7 @@ export default function PondoCheckoutPage() {
   async function runScreeningJourney() {
     if (!customer) return null;
 
-    if (selectedProfile.screeningMode === "skip") {
+    if (projectedRisk.decision === "auto_approve") {
       const autoApproved: VetResult = {
         transunionScore: 0,
         transunionApproved: true,
@@ -596,7 +733,7 @@ export default function PondoCheckoutPage() {
         screeningMode: "skip",
       };
       setVetResult(autoApproved);
-      log("OTP accepted - trusted profile progressed without manual background checks.");
+      log("Composite risk remained inside the auto-approve band after SA ID and geo checks.");
       return autoApproved;
     }
 
@@ -623,7 +760,11 @@ export default function PondoCheckoutPage() {
     log(`TransUnion ITC score: ${transunionScore} (${transunionApproved ? "approved" : "declined"})`);
     log(`Experian affordability: income ${new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR", maximumFractionDigits: 0 }).format(experianIncome)}/mo`);
     log(`Geo-location reviewed: ${capturedCity}, ${capturedProvince}`);
+    if (saidRisk) {
+      log(`SA ID derived age ${saidRisk.age} (+${saidRisk.ageScore}) and sex ${saidRisk.gender} (+${saidRisk.genderScore}).`);
+    }
     log(`Python fraud score: ${fraudScore.toFixed(2)} (${fraudScore <= 0.08 ? "low risk" : "high risk"})`);
+    log(`Composite risk score ${projectedRisk.score} triggered ${riskDecisionLabel(projectedRisk.decision).toLowerCase()}.`);
     log(approved ? "All checks passed - customer approved for checkout" : "Checks failed - manual review required");
     return result;
   }
@@ -632,7 +773,7 @@ export default function PondoCheckoutPage() {
     if (!session || !customer || !cartLines.length) throw new Error("checkout_incomplete");
 
     const submitWithToken = async (authToken: string) => {
-      const order = await createDemoOrder(authToken, {
+      return createDemoOrder(authToken, {
         customerId: capturedEmail,
         sessionId: session.sessionId,
         items: cartLines.map((line) => ({ productId: line.product.id, qty: line.qty })),
@@ -662,27 +803,17 @@ export default function PondoCheckoutPage() {
                 source: clientGeo.source,
               }
             : undefined,
-          validatedAddress: addressValidation
-            ? {
-                city: addressValidation.city,
-                province: addressValidation.province,
-                postalCode: addressValidation.postalCode,
-                latitude: addressValidation.latitude,
-                longitude: addressValidation.longitude,
-              }
-            : undefined,
+          validatedAddress: {
+            city: addressValidation?.city || "",
+            province: addressValidation?.province || "",
+            postalCode: addressValidation?.postalCode || "",
+            latitude: addressValidation?.latitude ?? null,
+            longitude: addressValidation?.longitude ?? null,
+          },
           otpVerified: true,
           saidVerified: isSaidValid,
         },
       });
-
-      const pay = await payDemoOrder(authToken, order.transaction.id, selectedPaymentMethod, {
-        settlementBank: "absa",
-        notifyEmail: capturedEmail,
-        notifyChannels: ["sms", "email"],
-      });
-
-      return { order, pay };
     };
 
     let authToken = await ensureCustomerAuth(true, capturedEmail || customer.email);
@@ -697,21 +828,23 @@ export default function PondoCheckoutPage() {
       submitted = await submitWithToken(authToken);
     }
 
-    setCompletedOrderId(submitted.order.transaction.id);
-    setPaymentSettlement(submitted.pay.settlement);
-    log(`Transaction cleared: ${submitted.order.transaction.id}`);
-    log(`Payment method confirmed: ${paymentMethodLabel(selectedPaymentMethod)}`);
-    log(`Funds settled to PONDO ${submitted.pay.settlement.bankLabel} (${submitted.pay.settlement.accountRef})`);
-    log("Order, settlement, and delivery process records were written to the PostgreSQL-backed database.");
+    setCompletedOrderId(submitted.transaction.id);
+    setCompletedTransaction(submitted.transaction);
+    setCompletedRiskAssessment(submitted.riskAssessment || null);
+    setPaymentSettlement(null);
+    log(`Transaction created: ${submitted.transaction.id}`);
+    log(`Payment method prepared: ${paymentMethodLabel(selectedPaymentMethod)}`);
+    log("Order has been written to Supabase and is awaiting PED payment at delivery.");
+    log("gateway_status and status are set to Awaiting_Payment until driver-side collection completes.");
+    if (submitted.riskAssessment) {
+      log(`Risk score recorded: ${submitted.riskAssessment.score} (${submitted.riskAssessment.decision})`);
+      log(`Risk factors: ${submitted.riskAssessment.factors.join(" | ")}`);
+    }
     log(`Order submitted using ${cartLines.length} cart item(s)`);
-    log(`Webhook posted to ${session.partnerLabel} for ${paymentMethodLabel(selectedPaymentMethod)}`);
+    log(`Checkout verification completed for ${session.partnerLabel}.`);
   }
 
   async function onVerifyOtp() {
-    if (!session || !customer) {
-      setError("Please restart checkout and try again.");
-      return;
-    }
     setError("");
     setProcessingMessage("");
     setBusy(true);
@@ -720,20 +853,20 @@ export default function PondoCheckoutPage() {
       setOtpVerified(true);
       log("OTP accepted - identity confirmed");
 
-      if (selectedProfile.screeningMode === "full") {
-        setProcessingMessage("Running KYC, credit, affordability, fraud, and geolocation checks...");
-      } else {
-        setProcessingMessage("Profile is exempt from background checks. Finalizing order confirmation...");
-      }
+      setProcessingMessage(
+        requiresEnhancedRiskChecks
+          ? "Running composite risk checks using SA ID age, sex, KYC, affordability, fraud, and geolocation..."
+          : "SA ID and geo-risk checks are within the auto-approve band. Finalizing order confirmation...",
+      );
 
       const result = await runScreeningJourney();
       if (!result?.approved) {
         throw new Error("Customer did not pass the required background checks.");
       }
 
-      const authToken = await ensureCustomerAuth(true, capturedEmail || customer.email);
+      const authToken = await ensureCustomerAuth(true, capturedEmail || customer?.email);
       await persistPondoRiskAssessment(authToken, {
-        sessionId: session.sessionId,
+        sessionId: session?.sessionId || "",
         saId: normalizedIdNumber,
         bureau: "transunion",
         screeningMode: result.screeningMode,
@@ -742,13 +875,23 @@ export default function PondoCheckoutPage() {
         kycIdentityVerified: result.kycIdentityVerified,
         experianIncome: result.experianIncome,
         fraudScore: result.fraudScore,
-        approved: result.approved,
+        approved: projectedRisk.decision === "auto_approve",
+        projectedScore: projectedRisk.score,
+        projectedDecision: projectedRisk.decision,
+        projectedFactors: projectedRisk.geoFactors,
         city: capturedCity,
         province: capturedProvince,
         postalCode: capturedPostalCode,
       });
 
-      setProcessingMessage("Checks passed. Writing the order and settlement to PostgreSQL...");
+      if (requiresKycPipelineView) {
+        setKycReadyToConfirm(true);
+        setProcessingMessage("");
+        log("Verification pipeline completed. Awaiting final order confirmation.");
+        return;
+      }
+
+      setProcessingMessage("Checks passed. Writing the order to Supabase and marking it as awaiting PED payment...");
       await completeApprovedPurchase();
       setProcessingMessage("");
       setStep(4);
@@ -761,7 +904,24 @@ export default function PondoCheckoutPage() {
     }
   }
 
-  const step3Label = completedOrderId ? "Completed" : "OTP Verification";
+  async function onConfirmVerifiedOrder() {
+    setError("");
+    setBusy(true);
+    setProcessingMessage("All checks passed. Writing the order to Supabase...");
+    try {
+      await completeApprovedPurchase();
+      setKycReadyToConfirm(false);
+      setProcessingMessage("");
+      setStep(4);
+    } catch (e) {
+      setProcessingMessage("");
+      setError(e instanceof Error ? e.message : "order_confirmation_failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const step3Label = completedOrderId ? "Completed" : requiresKycPipelineView ? "KYC Verification" : "OTP Verification";
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#e9f1ff_0%,#f7faff_34%,#edf4ff_100%)] text-pondo-navy-900">
@@ -870,16 +1030,19 @@ export default function PondoCheckoutPage() {
                     />
                     {showSaidFeedback ? (
                       isSaidValid ? (
-                        <p className="mt-1 text-xs font-semibold text-emerald-700">Valid South African ID number.</p>
+                        <div className="mt-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                          <div className="font-semibold">Home Affairs format validated.</div>
+                          {saidDetails ? (
+                            <div className="mt-1">
+                              DOB: {saidDetails.birthDate} | Age: {saidDetails.age} | Sex: {saidDetails.gender === "male" ? "Male" : "Female"}
+                              {saidRisk ? ` | ID risk: +${saidRisk.totalScore}` : ""}
+                            </div>
+                          ) : null}
+                          {isUnderAge ? <div className="mt-1 font-semibold text-red-700">Customer is under 18 and must be rejected.</div> : null}
+                        </div>
                       ) : (
                         <p className="mt-1 text-xs font-semibold text-red-600">Enter a valid 13-digit South African ID number.</p>
                       )
-                    ) : null}
-                    {saidDetails ? (
-                      <p className="mt-1 text-xs text-slate-500">
-                        DOB: {saidDetails.birthDate} | Age: {saidDetails.age} | Sex: {saidDetails.gender === "male" ? "Male" : "Female"}
-                        {saidRisk ? ` | Risk +${saidRisk.totalScore}` : ""}
-                      </p>
                     ) : null}
                   </div>
                   <div>
@@ -978,6 +1141,7 @@ export default function PondoCheckoutPage() {
                       onChange={(e) => setDeliveryDate(e.target.value)}
                       className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800"
                     />
+                    <p className="mt-1 text-xs text-slate-500">Choose a delivery date from tomorrow onward for managed fulfilment.</p>
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-bold text-slate-600">Delivery Time Slot</label>
@@ -991,13 +1155,57 @@ export default function PondoCheckoutPage() {
                             onClick={() => setDeliveryWindow(slot.id)}
                             className={[
                               "rounded-lg border px-3 py-2 text-sm font-semibold transition",
-                              active ? "border-pondo-orange-500 bg-pondo-orange-50 text-pondo-orange-700" : "border-pondo-line bg-white text-slate-700 hover:bg-slate-50",
+                              active
+                                ? "border-pondo-orange-500 bg-pondo-orange-500 text-white"
+                                : "border-pondo-line bg-white text-pondo-navy-900 hover:bg-[#eef3ff]",
                             ].join(" ")}
                           >
                             {slot.label}
                           </button>
                         );
                       })}
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">Available delivery windows are risk-managed and verified before dispatch.</p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-sm font-bold text-pondo-navy-900">Composite Risk Preview</div>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                    <div className="rounded-lg border border-white bg-white px-3 py-3 text-sm text-slate-700">
+                      <div className="font-semibold text-pondo-navy-900">South African ID Inputs</div>
+                      {saidRisk ? (
+                        <div className="mt-2 space-y-1 text-xs">
+                          <div>DOB: {saidRisk.birthDate}</div>
+                          <div>Age: {saidRisk.age} {"=>"} +{saidRisk.ageScore}</div>
+                          <div>Sex: {saidRisk.gender === "male" ? "Male" : "Female"} {"=>"} +{saidRisk.genderScore}</div>
+                          <div>Home Affairs validation: {isSaidValid ? "passed" : "pending"}</div>
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-xs text-slate-500">Enter a valid South African ID number to derive age and sex scoring.</div>
+                      )}
+                    </div>
+                    <div className="rounded-lg border border-white bg-white px-3 py-3 text-sm text-slate-700">
+                      <div className="font-semibold text-pondo-navy-900">Geo-Risk Inputs</div>
+                      <div className="mt-2 space-y-1 text-xs">
+                        <div>IP mismatch: {projectedRisk.ipMismatch ? "+40" : "+0"}</div>
+                        <div>High-risk zone: {projectedRisk.highRiskZone ? "+30" : "+0"}</div>
+                        <div>High order value: {projectedRisk.highValue ? "+20" : "+0"}</div>
+                        <div>Device fingerprint: {deviceFingerprint ? "+0" : "+10"}</div>
+                        <div>External IP country uplift: {projectedRisk.nonSouthAfricanIp ? "+25" : "+0"}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+                    <div className="font-semibold">Projected total: {projectedRisk.score} points - {riskDecisionLabel(projectedRisk.decision)}</div>
+                    <div className="mt-1">
+                      {isUnderAge
+                        ? "Customer is under 18 and the order must be rejected."
+                        : projectedRisk.decision === "manual_review_hold"
+                          ? "This checkout will move into manual review hold after verification checks."
+                          : projectedRisk.decision === "elevated_verification"
+                            ? "This checkout will follow the elevated verification pipeline."
+                            : "This checkout remains in the auto-approve band."}
                     </div>
                   </div>
                 </div>
@@ -1014,79 +1222,142 @@ export default function PondoCheckoutPage() {
                 </div>
 
                 <button onClick={onContinueToOtp} disabled={busy || addressLookupBusy || addressValidationBusy} className={primaryCtaClass}>
-                  {busy ? "Sending OTP..." : addressValidationBusy ? "Validating Address..." : "Continue to OTP Verification"}
+                  {busy ? "Sending OTP..." : addressValidationBusy ? "Validating Address..." : requiresKycPipelineView ? "Continue to KYC Verification" : "Continue to OTP Verification"}
                 </button>
               </div>
             ) : null}
 
             {step === 3 && customer ? (
               <div className="space-y-4">
-                <div className="rounded-2xl border border-pondo-line bg-[#f7faff] p-4">
-                  <h2 className="text-2xl font-extrabold">OTP Verification</h2>
-                  <p className="mt-2 text-sm text-slate-700">
-                    We sent a one-time PIN by SMS to <span className="font-bold">{capturedPhone}</span>. Verify the OTP to continue.
-                    {selectedProfile.screeningMode === "full"
-                      ? " KYC, credit, fraud, affordability, and geolocation checks will run automatically after verification."
-                      : " This profile will move directly to order confirmation after verification."}
-                  </p>
-                  {clientGeo ? (
-                    <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900">
-                      IP/Geo context: {clientGeo.city}, {clientGeo.province}, {clientGeo.country} | source {clientGeo.source}
+                {!kycReadyToConfirm ? (
+                  <div className="rounded-2xl border border-pondo-line bg-[#f7faff] p-4">
+                    <h2 className="text-2xl font-extrabold">{requiresKycPipelineView ? "KYC Verification" : "OTP Verification"}</h2>
+                    <p className="mt-2 text-sm text-slate-700">
+                      We sent a one-time PIN by SMS to <span className="font-bold">{capturedPhone}</span>. Verify the OTP to continue.
+                      {requiresEnhancedRiskChecks
+                        ? " Composite risk from SA ID age, sex, and geolocation sits above the auto-approve band, so elevated verification checks will run after OTP."
+                        : " SA ID and geolocation scoring are within the auto-approve band, so the order can move directly to confirmation after verification."}
+                    </p>
+
+                    <div className="mt-5 flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={async () => {
+                          setError("");
+                          setBusy(true);
+                          try {
+                            await requestOtp();
+                          } catch (e) {
+                            setError(e instanceof Error ? e.message : "otp_send_failed");
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                        disabled={busy}
+                        className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60"
+                      >
+                        Resend OTP to {capturedPhone}
+                      </button>
+                      {demoOtp ? <div className="text-xs font-semibold text-emerald-700">Demo OTP: {demoOtp}</div> : null}
                     </div>
-                  ) : null}
 
-                  <div className="mt-5 flex flex-wrap items-center gap-2">
-                    <button
-                      onClick={async () => {
-                        setError("");
-                        setBusy(true);
-                        try {
-                          await requestOtp();
-                        } catch (e) {
-                          setError(e instanceof Error ? e.message : "otp_send_failed");
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                      disabled={busy}
-                      className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60"
-                    >
-                      Resend OTP to {capturedPhone}
-                    </button>
-                    {demoOtp ? <div className="text-xs font-semibold text-emerald-700">Demo OTP: {demoOtp}</div> : null}
-                  </div>
-
-                  <div className="mt-3 flex gap-2">
-                    <input value={otpInput} onChange={(e) => setOtpInput(e.target.value)} placeholder="Enter OTP" className="w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-slate-800" />
-                    <button onClick={onVerifyOtp} disabled={busy || !otpRequestId || !otpInput.trim()} className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60">
-                      {busy ? "Verifying..." : "Verify OTP"}
-                    </button>
-                  </div>
-
-                  {processingMessage ? (
-                    <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
-                      {processingMessage}
+                    <div className="mt-3">
+                      <input value={otpInput} onChange={(e) => setOtpInput(e.target.value)} placeholder="Enter OTP" className="w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-slate-800" />
+                      <button onClick={onVerifyOtp} disabled={busy || !otpRequestId || !otpInput.trim()} className="mt-3 rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400 disabled:opacity-60">
+                        {busy ? "Verifying..." : "Verify OTP"}
+                      </button>
                     </div>
-                  ) : null}
 
-                  {otpVerified && !processingMessage ? (
-                    <div className="mt-2 text-sm font-semibold text-emerald-700">OTP verified - identity confirmed</div>
-                  ) : null}
-                </div>
+                    {processingMessage ? (
+                      <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+                        {processingMessage}
+                      </div>
+                    ) : null}
+
+                    {otpVerified && !processingMessage ? (
+                      <div className="mt-2 text-sm font-semibold text-emerald-700">OTP verified - identity confirmed</div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-pondo-line bg-white p-6 shadow-sm">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <h2 className="text-2xl font-extrabold text-pondo-navy-900">KYC Verification Pipeline</h2>
+                        <p className="mt-2 max-w-2xl text-sm text-slate-700">
+                          This checkout requires elevated trust checks before the order can be released. IP and delivery mismatches are treated as risk signals, not fraud by default.
+                        </p>
+                      </div>
+                      <div className={[
+                        "rounded-full px-4 py-2 text-xs font-black uppercase tracking-[0.08em]",
+                        projectedRisk.decision === "manual_review_hold"
+                          ? "border border-red-200 bg-red-50 text-red-600"
+                          : "border border-amber-200 bg-amber-50 text-amber-700",
+                      ].join(" ")}>
+                        Risk Score: {projectedRisk.decision === "manual_review_hold" ? Math.max(projectedRisk.score, 100) : projectedRisk.score}
+                        {" - "}
+                        {riskDecisionLabel(projectedRisk.decision)}
+                      </div>
+                    </div>
+
+                    <div className="mt-5 space-y-3">
+                      {[
+                        { title: "OTP Verification", detail: "SMS one-time pin sent to registered number", state: "Passed" },
+                        { title: "ID / Document Scan", detail: "South African ID validation and identity confirmation", state: isSaidValid ? "Passed" : "Pending" },
+                        { title: "ITC Credit Check", detail: "TransUnion / Experian credit bureau inquiry", state: vetResult?.transunionApproved ? "Passed" : "Review" },
+                        { title: "Affordability Assessment", detail: "Income versus order-value ratio analysis", state: vetResult?.experianIncome ? "Passed" : "Review" },
+                        { title: "Fraud Screening", detail: "Geo-risk, device, and behaviour checks", state: vetResult?.approved ? "Passed" : "Review" },
+                      ].map((item) => (
+                        <div key={item.title} className="flex items-center justify-between rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-sm font-black text-white">?</div>
+                            <div>
+                              <div className="font-bold text-emerald-800">{item.title}</div>
+                              <div className="text-xs text-slate-600">{item.detail}</div>
+                            </div>
+                          </div>
+                          <div className="text-xs font-black uppercase tracking-[0.08em] text-emerald-700">{item.state}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                        <div className="font-bold">Geo-risk band</div>
+                        <div className="mt-1">{projectedRisk.score <= 40 ? "0 - 40 auto-approve" : projectedRisk.score <= 70 ? "41 - 70 elevated verification" : "> 70 manual review hold"}</div>
+                        {saidRisk ? <div className="mt-1 text-xs">SA ID adds +{saidRisk.ageScore} for age and +{saidRisk.genderScore} for sex.</div> : null}
+                      </div>
+                      <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                        <div className="font-bold">Mismatch handling</div>
+                        <div className="mt-1">{projectedRisk.ipMismatch ? "IP and delivery address do not match. This is normal for work-to-home deliveries and is not fraud by default." : "IP and delivery address align for this checkout."}</div>
+                      </div>
+                    </div>
+
+                    <button onClick={onConfirmVerifiedOrder} disabled={busy} className="mt-5 w-full rounded-xl bg-[#1fb782] px-4 py-3 text-lg font-black text-white shadow-[0_10px_20px_rgba(31,183,130,0.28)] hover:bg-[#19a575] disabled:opacity-60">
+                      {busy
+                        ? "Confirming..."
+                        : projectedRisk.decision === "manual_review_hold"
+                          ? "Complete Checks and Place Into Manual Review"
+                          : "All Checks Passed - Confirm Order"}
+                    </button>
+                  </div>
+                )}
               </div>
             ) : null}
 
             {step === 4 && completedOrderId ? (
               <div className="space-y-4">
-                <div className="rounded-2xl border border-emerald-300 bg-white p-5 shadow-sm">
+                <div className={completedRiskAssessment?.decision === "manual_review_hold" ? "rounded-2xl border border-red-300 bg-white p-5 shadow-sm" : "rounded-2xl border border-emerald-300 bg-white p-5 shadow-sm"}>
                   <div className="flex items-start gap-3">
                     <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-2xl font-black text-emerald-700">
-                      ✓
+                      ?
                     </div>
                     <div>
-                      <h2 className="text-2xl font-extrabold text-emerald-950">Order received, thanks!</h2>
+                      <h2 className={completedRiskAssessment?.decision === "manual_review_hold" ? "text-2xl font-extrabold text-red-950" : "text-2xl font-extrabold text-emerald-950"}>
+                        {completedRiskAssessment?.decision === "manual_review_hold" ? "Order held for manual review" : "Order received, thanks!"}
+                      </h2>
                       <p className="text-sm text-slate-700">
-                        Confirmation has been sent to {capturedEmail} and SMS confirmation has been sent to {capturedPhone}.
+                        {completedRiskAssessment?.decision === "manual_review_hold"
+                          ? `Confirmation has been sent to ${capturedEmail}. The order is paused for manual review before PED collection and fulfilment release.`
+                          : `Confirmation has been sent to ${capturedEmail} and SMS confirmation has been sent to ${capturedPhone}. Payment will be collected on delivery using the PED device.`}
                       </p>
                     </div>
                   </div>
@@ -1100,12 +1371,42 @@ export default function PondoCheckoutPage() {
                     <div className="mt-4">
                       <div><span className="font-bold">Partner:</span> {session?.partnerLabel} fulfilment</div>
                       <div><span className="font-bold">Items:</span> {cartCount} item totalling {money(cartSubtotalCents)}</div>
+                      <div><span className="font-bold">gateway_status:</span> {completedTransaction?.gateway_status || "Awaiting_Payment"}</div>
+                      <div><span className="font-bold">status:</span> {completedTransaction?.status || "Awaiting_Payment"}</div>
                     </div>
                   </div>
 
                   <div className="mt-5 rounded-xl border border-pondo-line bg-[#f7faff] px-4 py-3 text-sm text-slate-700">
-                    Email and SMS notifications include the order summary, delivery address, estimated fulfilment date, and the PONDO verification outcome.
+                    {completedRiskAssessment?.decision === "manual_review_hold"
+                      ? "Ops review is now required. Settlement and reconciliation remain blank until manual release and PED payment both complete."
+                      : "Email and SMS notifications include the order summary, delivery address, estimated fulfilment date, and the PONDO verification outcome. Settlement and reconciliation will only update after PED payment is completed at the customer doorstep."}
                   </div>
+
+                  {completedRiskAssessment ? (
+                    <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                        <div className="font-bold text-pondo-navy-900">Composite risk decision</div>
+                        <div className="mt-2 text-lg font-black text-pondo-navy-900">{completedRiskAssessment.score} pts - {completedRiskAssessment.decisionLabel}</div>
+                        <div className="mt-1">{completedRiskAssessment.bandLabel}</div>
+                        <div className="mt-2">{completedRiskAssessment.recommendedPath}</div>
+                        {completedRiskAssessment.identityRisk && completedRiskAssessment.identityRisk.age !== null ? (
+                          <div className="mt-2 text-xs text-slate-600">
+                            SA ID derived DOB {completedRiskAssessment.identityRisk.birthDate} | Age {completedRiskAssessment.identityRisk.age} (+{completedRiskAssessment.identityRisk.ageScore}) | Sex {completedRiskAssessment.identityRisk.gender} (+{completedRiskAssessment.identityRisk.genderScore})
+                          </div>
+                        ) : null}
+                        <div className="mt-2 text-xs uppercase tracking-[0.08em] text-slate-500">Verification: {completedRiskAssessment.verifiedStatus}</div>
+                      </div>
+                      <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                        <div className="font-bold">IP vs Address Review</div>
+                        <div className="mt-2">
+                          {completedRiskAssessment.flags.ipMismatch
+                            ? "Mismatch detected. This is not fraud by default and is treated as a verification signal only."
+                            : "IP region and delivery region align for this checkout."}
+                        </div>
+                        <div className="mt-2 text-xs text-sky-800">{completedRiskAssessment.factors.join(" | ")}</div>
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div className="mt-4 flex flex-wrap gap-3">
                     <button onClick={() => router.push(`/PondoDemo/confirmation/${completedOrderId}`)} className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400">
@@ -1117,12 +1418,12 @@ export default function PondoCheckoutPage() {
                   </div>
 
                   <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                    {vetResult?.screeningMode === "full" ? (
+                    {vetResult?.screeningMode === "full" || requiresEnhancedRiskChecks ? (
                       <>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">KYC verified</div>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Credit approved</div>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Affordability passed</div>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Fraud low risk</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">OTP verified</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">ID verified</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Credit and affordability checked</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">{completedRiskAssessment?.decision === "manual_review_hold" ? "Queued for manual review" : "Released to fulfilment"}</div>
                       </>
                     ) : (
                       <>
@@ -1169,10 +1470,20 @@ export default function PondoCheckoutPage() {
                 )}
               </div>
               <div className="mt-3 text-3xl font-extrabold text-pondo-orange-500">{money(cartSubtotalCents)}</div>
-              {step === 4 && paymentSettlement ? (
-                <div className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                  Supabase settlement recorded to {paymentSettlement.bankLabel} using {selectedPaymentMethodMeta.label}.
-                </div>
+              {step === 4 ? (
+                paymentSettlement ? (
+                  <div className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                    Supabase settlement recorded to {paymentSettlement.bankLabel} using {selectedPaymentMethodMeta.label}.
+                  </div>
+                ) : completedRiskAssessment?.decision === "manual_review_hold" ? (
+                  <div className="mt-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
+                    Manual review hold is active. PED collection, settlement, and reconciliation stay blocked until ops release the order.
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    Payment is currently awaiting PED collection. `gateway_status`, `status`, `reconciled_at`, and `settled_at` will update after doorstep payment is completed.
+                  </div>
+                )
               ) : null}
             </div>
           </aside>
@@ -1181,3 +1492,4 @@ export default function PondoCheckoutPage() {
     </div>
   );
 }
+

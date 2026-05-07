@@ -74,6 +74,51 @@ export type OrderRiskContext = {
 };
 
 export type DemoOrderDetail = { transaction: Transaction; details: unknown; audit: AuditEntry[] };
+export type RiskAssessment = {
+  score: number;
+  decision: "auto_approve" | "elevated_verification" | "manual_review_hold";
+  decisionLabel: string;
+  bandLabel: string;
+  recommendedPath: string;
+  factors: string[];
+  notes: string[];
+  ipAddress: string;
+  ipGeo: {
+    city: string;
+    province: string;
+    country: string;
+    postalCode: string;
+    latitude: number | null;
+    longitude: number | null;
+    source: string;
+  };
+  deliveryGeo: {
+    city: string;
+    province: string;
+    postalCode: string;
+    latitude: number | null;
+    longitude: number | null;
+  };
+  flags: {
+    ipMismatch: boolean;
+    highRiskZone: boolean;
+    highValue: boolean;
+    fingerprintPresent: boolean;
+    nonSouthAfricanIp: boolean;
+    underAge: boolean;
+  };
+  mismatchIsNormal: boolean;
+  identityRisk: {
+    birthDate: string | null;
+    age: number | null;
+    gender: "male" | "female" | null;
+    ageScore: number;
+    genderScore: number;
+    totalScore: number;
+    rejected: boolean;
+  } | null;
+  verifiedStatus: string;
+};
 export type DeliveryProcessStep = {
   index: number;
   title: string;
@@ -321,7 +366,11 @@ export async function createDemoOrder(
     riskContext?: OrderRiskContext;
   },
 ) {
-  return apiFetch<{ transaction: Transaction; qrPayload: string }>("/api/pondo/orders", { method: "POST", token, body: JSON.stringify(input) });
+  return apiFetch<{ transaction: Transaction; qrPayload: string; riskAssessment: RiskAssessment | null }>("/api/pondo/orders", {
+    method: "POST",
+    token,
+    body: JSON.stringify(input),
+  });
 }
 
 export async function bnplVetDemoOrder(token: string, id: string, input: { saId: string; bureau: "transunion" | "experian" }) {
@@ -448,6 +497,9 @@ export async function persistPondoRiskAssessment(
     experianIncome: number;
     fraudScore: number;
     approved: boolean;
+    projectedScore?: number;
+    projectedDecision?: "auto_approve" | "elevated_verification" | "manual_review_hold";
+    projectedFactors?: string[];
     city?: string;
     province?: string;
     postalCode?: string;
