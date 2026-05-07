@@ -8,6 +8,7 @@ export const runtime = "nodejs";
 
 const schema = z.object({
   customerId: z.string().min(1),
+  sessionId: z.string().min(4).optional(),
   items: z.array(z.object({ productId: z.string().min(1), qty: z.number().int().positive() })).min(1),
   delivery: z.object({
     fullName: z.string().min(1),
@@ -55,6 +56,7 @@ export async function POST(req: NextRequest) {
     const out = await createOrder({
       actor: auth.user.sub,
       customerEmail: parsed.data.customerId,
+      sessionId: parsed.data.sessionId,
       items: parsed.data.items,
       delivery: parsed.data.delivery,
       paymentMethod: parsed.data.paymentMethod,

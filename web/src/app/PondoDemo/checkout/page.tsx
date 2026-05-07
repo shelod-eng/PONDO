@@ -1,15 +1,17 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PondoDemoNav } from "@/components/PondoDemoNav";
 import {
   autocompleteAddress,
+  confirmPondoCheckoutDetails,
   createDemoOrder,
   fetchDemoProducts,
   fetchPartnerCart,
   getPlaceAddress,
   login,
+  persistPondoRiskAssessment,
   sendOtp,
   simulateDemoCredit,
   type AddressSuggestion,
@@ -653,6 +655,10 @@ export default function PondoCheckoutPage() {
   }
 
   async function onContinueToOtp() {
+    if (!session) {
+      setError("Please start checkout again.");
+      return;
+    }
     if (!isSaidValid) {
       setSaidBlurred(true);
       setError("Please enter a valid South African ID number before proceeding.");
@@ -684,7 +690,26 @@ export default function PondoCheckoutPage() {
     setBusy(true);
     try {
       await ensureValidatedAddress();
+      await confirmPondoCheckoutDetails({
+        sessionId: session.sessionId,
+        email: capturedEmail,
+        fullName: capturedFullName,
+        idNumber: normalizedIdNumber,
+        phone: capturedPhone,
+        address: capturedAddress,
+        city: capturedCity,
+        province: capturedProvince,
+        postalCode: capturedPostalCode,
+        geoLocation: [capturedCity, capturedProvince].filter(Boolean).join(", "),
+        latitude: addressValidation?.latitude ?? null,
+        longitude: addressValidation?.longitude ?? null,
+        termsAccepted: true,
+      });
       log("T&C accepted - POPIA consent captured");
+      log("Checkout session persisted to the PostgreSQL workflow store.");
+      if (saidRisk) {
+        log(`SA ID derived age ${saidRisk.age} (+${saidRisk.ageScore}) and sex ${saidRisk.gender} (+${saidRisk.genderScore}).`);
+      }
       await requestOtp();
       setStep(3);
     } catch (e) {
@@ -750,6 +775,7 @@ export default function PondoCheckoutPage() {
     const submitWithToken = async (authToken: string) => {
       return createDemoOrder(authToken, {
         customerId: capturedEmail,
+        sessionId: session.sessionId,
         items: cartLines.map((line) => ({ productId: line.product.id, qty: line.qty })),
         delivery: {
           fullName: capturedFullName,
@@ -837,6 +863,26 @@ export default function PondoCheckoutPage() {
       if (!result?.approved) {
         throw new Error("Customer did not pass the required background checks.");
       }
+
+      const authToken = await ensureCustomerAuth(true, capturedEmail || customer?.email);
+      await persistPondoRiskAssessment(authToken, {
+        sessionId: session?.sessionId || "",
+        saId: normalizedIdNumber,
+        bureau: "transunion",
+        screeningMode: result.screeningMode,
+        transunionScore: result.screeningMode === "skip" ? null : result.transunionScore,
+        transunionApproved: result.transunionApproved,
+        kycIdentityVerified: result.kycIdentityVerified,
+        experianIncome: result.experianIncome,
+        fraudScore: result.fraudScore,
+        approved: projectedRisk.decision === "auto_approve",
+        projectedScore: projectedRisk.score,
+        projectedDecision: projectedRisk.decision,
+        projectedFactors: projectedRisk.geoFactors,
+        city: capturedCity,
+        province: capturedProvince,
+        postalCode: capturedPostalCode,
+      });
 
       if (requiresKycPipelineView) {
         setKycReadyToConfirm(true);
@@ -1262,7 +1308,7 @@ export default function PondoCheckoutPage() {
                       ].map((item) => (
                         <div key={item.title} className="flex items-center justify-between rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3">
                           <div className="flex items-center gap-3">
-                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-sm font-black text-white">✓</div>
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-sm font-black text-white">?</div>
                             <div>
                               <div className="font-bold text-emerald-800">{item.title}</div>
                               <div className="text-xs text-slate-600">{item.detail}</div>
@@ -1302,7 +1348,7 @@ export default function PondoCheckoutPage() {
                 <div className={completedRiskAssessment?.decision === "manual_review_hold" ? "rounded-2xl border border-red-300 bg-white p-5 shadow-sm" : "rounded-2xl border border-emerald-300 bg-white p-5 shadow-sm"}>
                   <div className="flex items-start gap-3">
                     <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-2xl font-black text-emerald-700">
-                      ✓
+                      ?
                     </div>
                     <div>
                       <h2 className={completedRiskAssessment?.decision === "manual_review_hold" ? "text-2xl font-extrabold text-red-950" : "text-2xl font-extrabold text-emerald-950"}>
@@ -1343,7 +1389,7 @@ export default function PondoCheckoutPage() {
                         <div className="mt-2 text-lg font-black text-pondo-navy-900">{completedRiskAssessment.score} pts - {completedRiskAssessment.decisionLabel}</div>
                         <div className="mt-1">{completedRiskAssessment.bandLabel}</div>
                         <div className="mt-2">{completedRiskAssessment.recommendedPath}</div>
-                        {completedRiskAssessment.identityRisk.age !== null ? (
+                        {completedRiskAssessment.identityRisk && completedRiskAssessment.identityRisk.age !== null ? (
                           <div className="mt-2 text-xs text-slate-600">
                             SA ID derived DOB {completedRiskAssessment.identityRisk.birthDate} | Age {completedRiskAssessment.identityRisk.age} (+{completedRiskAssessment.identityRisk.ageScore}) | Sex {completedRiskAssessment.identityRisk.gender} (+{completedRiskAssessment.identityRisk.genderScore})
                           </div>
@@ -1446,3 +1492,4 @@ export default function PondoCheckoutPage() {
     </div>
   );
 }
+

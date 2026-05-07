@@ -227,6 +227,8 @@ export function deriveManualDeliveryLocation(address1: string, city: string, pro
   };
 }
 
+export const deriveDeliveryLocation = deriveManualDeliveryLocation;
+
 export function assessGeoRisk(input: {
   ipAddress: string;
   ipGeo: Awaited<ReturnType<typeof lookupIpGeo>>;

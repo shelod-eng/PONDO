@@ -11,6 +11,9 @@ export type Transaction = {
   gateway: string;
   gateway_status: string;
   credit_tier: string | null;
+  risk_score?: number | null;
+  risk_decision?: string | null;
+  risk_level?: string | null;
   qr_payload: string;
   status: string;
   qr_scanned_at: string | null;
@@ -19,10 +22,6 @@ export type Transaction = {
   created_at: string;
   updated_at: string;
   external_ref: string | null;
-  risk_score?: number | null;
-  risk_level?: string | null;
-  risk_decision?: string | null;
-  verified_status?: string | null;
 };
 
 export type AuditEntry = { at: string; actor: string; action: string; data: unknown };
@@ -48,6 +47,30 @@ export type DeliveryDetails = {
   postalCode: string;
   deliveryDate?: string;
   deliveryWindow?: string;
+};
+
+export type OrderRiskContext = {
+  idNumber?: string;
+  deviceFingerprint?: string;
+  clientGeo?: {
+    ip?: string;
+    city?: string;
+    province?: string;
+    country?: string;
+    postalCode?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    source?: string;
+  };
+  validatedAddress?: {
+    city?: string;
+    province?: string;
+    postalCode?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+  };
+  otpVerified?: boolean;
+  saidVerified?: boolean;
 };
 
 export type DemoOrderDetail = { transaction: Transaction; details: unknown; audit: AuditEntry[] };
@@ -92,32 +115,9 @@ export type RiskAssessment = {
     ageScore: number;
     genderScore: number;
     totalScore: number;
-    homeAffairsValidated: boolean;
-  };
+    rejected: boolean;
+  } | null;
   verifiedStatus: string;
-};
-export type OrderRiskContext = {
-  idNumber?: string;
-  deviceFingerprint?: string;
-  clientGeo?: {
-    ip?: string;
-    city?: string;
-    province?: string;
-    country?: string;
-    postalCode?: string;
-    latitude?: number | null;
-    longitude?: number | null;
-    source?: string;
-  };
-  validatedAddress?: {
-    city?: string;
-    province?: string;
-    postalCode?: string;
-    latitude?: number | null;
-    longitude?: number | null;
-  };
-  otpVerified?: boolean;
-  saidVerified?: boolean;
 };
 export type DeliveryProcessStep = {
   index: number;
@@ -357,9 +357,20 @@ export async function simulateDemoCredit(input: { saId: string; bureau: "transun
 
 export async function createDemoOrder(
   token: string,
-  input: { customerId: string; items: Array<{ productId: string; qty: number }>; delivery: DeliveryDetails; paymentMethod: PaymentMethod; riskContext?: OrderRiskContext },
+  input: {
+    customerId: string;
+    sessionId?: string;
+    items: Array<{ productId: string; qty: number }>;
+    delivery: DeliveryDetails;
+    paymentMethod: PaymentMethod;
+    riskContext?: OrderRiskContext;
+  },
 ) {
-  return apiFetch<{ transaction: Transaction; qrPayload: string; riskAssessment: RiskAssessment }>("/api/pondo/orders", { method: "POST", token, body: JSON.stringify(input) });
+  return apiFetch<{ transaction: Transaction; qrPayload: string; riskAssessment: RiskAssessment | null }>("/api/pondo/orders", {
+    method: "POST",
+    token,
+    body: JSON.stringify(input),
+  });
 }
 
 export async function bnplVetDemoOrder(token: string, id: string, input: { saId: string; bureau: "transunion" | "experian" }) {
@@ -446,6 +457,59 @@ export async function verifyOtp(input: { requestId: string; code: string }) {
   return apiFetch<{ ok: true; sessionId: string }>("/api/pondo/verify-otp", {
     method: "POST",
     body: JSON.stringify(input),
+  });
+}
+
+export async function confirmPondoCheckoutDetails(
+  input: {
+    sessionId: string;
+    email: string;
+    fullName: string;
+    idNumber: string;
+    phone: string;
+    address: string;
+    city: string;
+    province: string;
+    postalCode: string;
+    geoLocation?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    termsAccepted: true;
+  },
+) {
+  const { sessionId, ...body } = input;
+  return apiFetch<{ ok: true; sessionId: string }>(`/api/pondo/checkout-sessions/${encodeURIComponent(sessionId)}/confirm-details`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function persistPondoRiskAssessment(
+  token: string,
+  input: {
+    sessionId: string;
+    saId: string;
+    bureau: "transunion" | "experian";
+    screeningMode: "full" | "skip";
+    transunionScore: number | null;
+    transunionApproved: boolean;
+    kycIdentityVerified: boolean;
+    experianIncome: number;
+    fraudScore: number;
+    approved: boolean;
+    projectedScore?: number;
+    projectedDecision?: "auto_approve" | "elevated_verification" | "manual_review_hold";
+    projectedFactors?: string[];
+    city?: string;
+    province?: string;
+    postalCode?: string;
+  },
+) {
+  const { sessionId, ...body } = input;
+  return apiFetch<{ ok: true; approved: boolean }>(`/api/pondo/checkout-sessions/${encodeURIComponent(sessionId)}/risk-checks`, {
+    method: "POST",
+    token,
+    body: JSON.stringify(body),
   });
 }
 
