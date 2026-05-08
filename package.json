@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "build": "npm --workspace web run build",
     "build:web": "npm --workspace web run build && node scripts/sync-next-output.cjs",
     "start:web": "npm --workspace web run start",
     "dev:api": "npm --workspace api run dev",

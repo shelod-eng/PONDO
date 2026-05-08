@@ -46,7 +46,7 @@ export default function ConfirmationPage() {
       <PondoDemoNav />
       <div className="mx-auto max-w-3xl px-6 py-10">
         <h1 className="text-2xl font-semibold tracking-tight">Order confirmed</h1>
-        <p className="mt-2 text-sm text-slate-600">Every completed order generates a unique QR code.</p>
+        <p className="mt-2 text-sm text-slate-600">Every verified order generates a unique QR code for PED-assisted delivery collection.</p>
 
         {!auth ? (
           <div className="mt-6 rounded-2xl border border-pondo-line bg-white p-6">

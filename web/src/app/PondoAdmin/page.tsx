@@ -117,6 +117,51 @@ export default function PondoAdminPage() {
         </div>
 
         <KPICards metrics={kpis} />
+        <section className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
+          <div className="admin-card rounded-[28px] border border-[rgba(157,194,242,0.14)] bg-white p-6">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.34em] text-pondo-orange-500">Geo-Risk Scoring</div>
+            <h2 className="mt-3 text-3xl font-semibold text-pondo-navy-900">Checkout decisions now follow the exact geo-risk bands.</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">
+              IP capture, manual address normalization, device fingerprinting, and order-value scoring now route each checkout
+              into auto-approve, elevated verification, or manual review hold. IP and delivery mismatches are treated as
+              verification signals, not fraud by default.
+            </p>
+            <div className="mt-5 grid gap-3 md:grid-cols-3">
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">0 - 40 pts</div>
+                <div className="mt-2 text-xl font-bold text-emerald-900">Auto-Approve</div>
+                <div className="mt-1 text-sm text-emerald-800">OTP-only flow may continue into Awaiting_Payment.</div>
+              </div>
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">41 - 70 pts</div>
+                <div className="mt-2 text-xl font-bold text-amber-900">Elevated Verification</div>
+                <div className="mt-1 text-sm text-amber-800">KYC, credit, affordability, and fraud checks must pass.</div>
+              </div>
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-red-700">&gt; 70 pts</div>
+                <div className="mt-2 text-xl font-bold text-red-900">Manual Review Hold</div>
+                <div className="mt-1 text-sm text-red-800">Order stays held until ops clears it for fulfilment.</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="admin-card rounded-[28px] border border-[rgba(157,194,242,0.14)] bg-white p-6">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.34em] text-pondo-sky-500">Risk Inputs</div>
+            <div className="mt-4 space-y-3">
+              {[
+                "IP capture from proxy headers and server request context",
+                "Manual delivery-address normalization while Google billing is disabled",
+                "Device fingerprint comparison for new-session detection",
+                "High-value uplift for carts above R10,000",
+                "Mismatch logic framed as normal, not fraud by default",
+              ].map((item) => (
+                <div key={item} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
         <CheckoutTable records={checkoutRecords} />
 
         <div className="space-y-8">

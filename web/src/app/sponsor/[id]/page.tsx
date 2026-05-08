@@ -62,6 +62,10 @@ export default function SponsorTxnDetail() {
                 <div className="font-semibold">{tx.gateway_status}</div>
                 <div className="text-white/60">credit_tier</div>
                 <div className="font-semibold">{tx.credit_tier ?? "-"}</div>
+                <div className="text-white/60">risk_score</div>
+                <div className="font-semibold">{tx.risk_score ?? "-"}</div>
+                <div className="text-white/60">risk_decision</div>
+                <div className="font-semibold">{tx.risk_decision ?? "-"}</div>
               </div>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
