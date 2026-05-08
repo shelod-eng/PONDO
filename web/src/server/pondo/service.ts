@@ -1179,7 +1179,7 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
          risk_completed_at = now(),
          updated_at = now()
      where id = $1`,
-    [session.id, requiresManualReview ? "manual_review" : "risk_approved"],
+    [session.id, requiresManualReview ? "risk_failed" : "risk_approved"],
   );
 
   await createAuditEvent({

@@ -215,14 +215,34 @@ const API_BASE_URLS = Array.from(new Set([configuredApiBase, "", "http://localho
 const API_BASE_URL = API_BASE_URLS[0];
 
 function extractErrorMessage(status: number, data: unknown, text: string) {
+  let code = "";
   if (data && typeof data === "object") {
     const maybeError = (data as { error?: unknown; message?: unknown }).error;
     const maybeMessage = (data as { error?: unknown; message?: unknown }).message;
-    if (typeof maybeError === "string" && maybeError.trim()) return maybeError;
-    if (typeof maybeMessage === "string" && maybeMessage.trim()) return maybeMessage;
+    if (typeof maybeError === "string" && maybeError.trim()) code = maybeError.trim();
+    if (typeof maybeMessage === "string" && maybeMessage.trim()) return { code, message: maybeMessage.trim() };
+    if (code) return { code, message: code };
   }
-  if (text.trim()) return text.trim();
-  return `request_failed_${status}`;
+  if (text.trim()) return { code, message: text.trim() };
+  return { code: code || `request_failed_${status}`, message: `request_failed_${status}` };
+}
+
+function normalizeFetchFailure(error: unknown) {
+  if (error instanceof Error) {
+    const code =
+      typeof (error as { code?: unknown }).code === "string"
+        ? ((error as { code?: string }).code ?? "")
+        : "";
+    const normalized = error.message.toLowerCase();
+    if (normalized === "failed to fetch" || normalized.includes("fetch failed") || normalized.includes("networkerror")) {
+      return Object.assign(new Error("The service is temporarily unavailable. Please try again in a moment."), {
+        code: code || "service_unreachable",
+      });
+    }
+    return error;
+  }
+
+  return new Error("The service is temporarily unavailable. Please try again in a moment.");
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit & { token?: string }) {
@@ -263,18 +283,14 @@ async function apiFetch<T>(path: string, init?: RequestInit & { token?: string }
         throw nonJsonErr;
       }
 
-      const message = extractErrorMessage(res.status, data, rawText);
+      const { code, message } = extractErrorMessage(res.status, data, rawText);
 
       // Fallback to the next candidate when this backend does not expose the route.
       if ((res.status === 404 || res.status === 405 || res.status === 502 || res.status === 503 || res.status === 504) && hasNext) continue;
 
-      throw Object.assign(new Error(message), { status: res.status, data, baseUrl, path });
+      throw Object.assign(new Error(message), { status: res.status, data, baseUrl, path, code: code || message });
     } catch (error) {
-      if (error instanceof Error) {
-        lastError = error;
-      } else {
-        lastError = new Error("request_failed");
-      }
+      lastError = normalizeFetchFailure(error);
       if (hasNext) continue;
       throw lastError;
     }

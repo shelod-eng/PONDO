@@ -1,11 +1,8 @@
 import { findProduct } from "./catalog.js";
 
 const partnerLabels = {
-  amazon: "Amazon.co.za",
-  temu: "Temu",
+  amazon: "Amazon SA",
   takealot: "Takealot",
-  woocommerce: "WooCommerce",
-  shopify: "Shopify",
 };
 
 const partnerSeeds = {

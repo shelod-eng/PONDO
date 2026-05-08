@@ -1,0 +1,41 @@
+Image 1 is what worked with everything from GitHub Commit: (3617886
+Add SA ID age and sex risk scoring) and Deployment ID:DM8LstLqf --> Image 2 which is your recent commit API does not working and the features and functionality in the build and the deployment in (3617886
+Add SA ID age and sex risk scoring) and Deployment ID:DM8LstLqf ) are not there, Image 3 after the client has confirmed the OTP - then all IP vs Geolocation scoring in the backend is applied - please review all functionality in and UI features that were in ((3617886
+Add SA ID age and sex risk scoring) and Deployment ID:DM8LstLqf ) and make sure the entire flow works and nothing is left out as per the attached PONDO-Geo-Risk-Scoring and Existing profile loaded. Final verification path now comes from South African ID, age, sex, and geo-risk scoring. 
+NB: I am presenting at 6pm
+
+Image 1 is what worked with everything from GitHub Commit: (3617886
+Add SA ID age and sex risk scoring) and Deployment ID:DM8LstLqf --> Image 2 which is your recent commit API does not working and the features and functionality in the build and the deployment in (3617886
+Add SA ID age and sex risk scoring) and Deployment ID:DM8LstLqf ) are not there, Image 3 after the client has confirmed the OTP - then all IP vs Geolocation scoring in the backend is applied - please review all functionality in and UI features that were in ((3617886
+Add SA ID age and sex risk scoring) and Deployment ID:DM8LstLqf ) and make sure the entire flow works and nothing is left out as per the attached PONDO-Geo-Risk-Scoring and Existing profile loaded. Final verification path now comes from South African ID, age, sex, and geo-risk scoring. NB: I am presenting at 6pm --> 
+(Existing profile loaded. Final verification path now comes from South African ID, age, sex, and geo-risk scoring)
+
+
+
+host:
+aws-0-eu-west-1.pooler.supabase.com
+
+port:5432
+database:postgres
+user:postgres.gcjzcbvzhsbfeousgktq
+password: eVoucher@2026
+
+postgresql://postgres.gcjzcbvzhsbfeousgktq:[eVoucher@2026]@aws-0-eu-west-1.pooler.supabase.com:5432/postgres
+======================================
+# API
+PORT=4100
+NODE_ENV=development
+
+# Auth
+JWT_SECRET=dev-secret-change-me
+
+# Storage
+USE_IN_MEMORY=false
+
+# PostgreSQL (optional if USE_IN_MEMORY=true)
+DB_HOST=aws-0-eu-west-1.pooler.supabase.com
+DB_PORT=5432
+DB_USER=postgres.gcjzcbvzhsbfeousgktq
+DB_PASSWORD=Mapipa@1784
+DB_NAME=postgres
+DB_SSL=true

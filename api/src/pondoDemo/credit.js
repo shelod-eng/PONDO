@@ -1,8 +1,10 @@
 export const demoSaIds = [
-  { saId: "8001015009087", label: "Approved (Tier A)" },
-  { saId: "9005054800081", label: "Approved (Tier A)" },
-  { saId: "8501015800088", label: "Approved (Tier A)" },
-  { saId: "9203124200180", label: "Approved (Tier A)" },
+  { saId: "8501015800088", label: "Thabo Nkosi - Male profile, checks required" },
+  { saId: "9203124200180", label: "Sibusiso Mokoena - Male profile, checks required" },
+  { saId: "7806155200085", label: "Mandla Khumalo - Male profile, checks required" },
+  { saId: "8001015009087", label: "Amara Naidoo - Female 35+, direct approval" },
+  { saId: "9005054800081", label: "Zanele Mthembu - Female 35+, direct approval" },
+  { saId: "5101015800080", label: "Grace Maseko - Elderly citizen, direct approval" },
 ];
 
 const scoreById = new Map([
@@ -10,6 +12,8 @@ const scoreById = new Map([
   ["9005054800081", 700],
   ["8501015800088", 705],
   ["9203124200180", 710],
+  ["7806155200085", 718],
+  ["5101015800080", 690],
 ]);
 
 function validateSAID(id) {

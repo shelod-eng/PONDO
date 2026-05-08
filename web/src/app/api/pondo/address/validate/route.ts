@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { apiErrorResponse, invalidRequest } from "@/server/apiErrors";
 import { isGoogleMapsConfigured, validateAddress } from "@/server/googleMaps";
 
 export const runtime = "nodejs";
@@ -11,17 +12,17 @@ const schema = z.object({
 
 export async function POST(req: NextRequest) {
   if (!isGoogleMapsConfigured()) {
-    return NextResponse.json({ error: "google_maps_not_configured" }, { status: 503 });
+    return apiErrorResponse(new Error("google_maps_not_configured"), "address_validation_failed");
   }
 
   const body = await req.json().catch(() => null);
   const parsed = schema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ error: "invalid_request", details: parsed.error.flatten() }, { status: 400 });
+  if (!parsed.success) return invalidRequest(parsed.error);
 
   try {
     const validation = await validateAddress(parsed.data.address, parsed.data.sessionToken);
     return NextResponse.json({ validation });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "address_validation_failed" }, { status: 400 });
+    return apiErrorResponse(error, "address_validation_failed");
   }
 }

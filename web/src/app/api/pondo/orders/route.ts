@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { apiErrorResponse, invalidRequest } from "@/server/apiErrors";
 import { requireUser } from "@/server/pondo/auth";
 import { extractClientIp } from "@/server/pondo/risk";
 import { createOrder } from "@/server/pondo/service";
@@ -48,10 +49,10 @@ const schema = z.object({
 
 export async function POST(req: NextRequest) {
   const auth = requireUser(req, ["customer", "sponsor"]);
-  if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: 401 });
+  if ("error" in auth) return apiErrorResponse(new Error(auth.error || "invalid_auth"), auth.error || "invalid_auth");
   const body = await req.json().catch(() => null);
   const parsed = schema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ error: "invalid_request", details: parsed.error.flatten() }, { status: 400 });
+  if (!parsed.success) return invalidRequest(parsed.error);
   try {
     const out = await createOrder({
       actor: auth.user.sub,
@@ -65,6 +66,6 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json(out);
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "create_order_failed" }, { status: 400 });
+    return apiErrorResponse(error, "create_order_failed");
   }
 }

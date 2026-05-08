@@ -280,14 +280,15 @@ function createAddressSessionToken() {
   return `pondo-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function isGoogleAddressAssistUnavailable(message: string) {
-  const normalized = message.toLowerCase();
+function isGoogleAddressAssistUnavailable(message: string, code?: string) {
+  const normalized = (code || message).toLowerCase();
+  const normalizedMessage = message.toLowerCase();
   return (
     normalized === "google_maps_not_configured" ||
-    normalized.includes("requires billing to be enabled") ||
-    normalized.includes("places api (new) has not been used") ||
-    normalized.includes("address validation api has not been used") ||
-    normalized.includes("api has not been used in project")
+    normalizedMessage.includes("requires billing to be enabled") ||
+    normalizedMessage.includes("places api (new) has not been used") ||
+    normalizedMessage.includes("address validation api has not been used") ||
+    normalizedMessage.includes("api has not been used in project")
   );
 }
 
@@ -455,7 +456,8 @@ export default function PondoCheckoutPage() {
         setAddressSuggestionsOpen(out.suggestions.length > 0);
       } catch (e) {
         const message = e instanceof Error ? e.message : "address_autocomplete_failed";
-        if (isGoogleAddressAssistUnavailable(message)) {
+        const code = typeof e === "object" && e && "code" in e && typeof (e as { code?: unknown }).code === "string" ? (e as { code: string }).code : "";
+        if (isGoogleAddressAssistUnavailable(message, code)) {
           setAddressAssistAvailable(false);
           setAddressSuggestions([]);
           setAddressSuggestionsOpen(false);
@@ -617,7 +619,8 @@ export default function PondoCheckoutPage() {
       log(`Google validated address: ${out.validation.formattedAddress}`);
     } catch (e) {
       const message = e instanceof Error ? e.message : "address_validation_failed";
-      if (isGoogleAddressAssistUnavailable(message)) {
+      const code = typeof e === "object" && e && "code" in e && typeof (e as { code?: unknown }).code === "string" ? (e as { code: string }).code : "";
+      if (isGoogleAddressAssistUnavailable(message, code)) {
         setAddressAssistAvailable(false);
         setAddressValidation(null);
         setAddressSuggestions([]);
