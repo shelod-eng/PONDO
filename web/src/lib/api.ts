@@ -11,6 +11,9 @@ export type Transaction = {
   gateway: string;
   gateway_status: string;
   credit_tier: string | null;
+  risk_score?: number | null;
+  risk_decision?: string | null;
+  risk_level?: string | null;
   qr_payload: string;
   status: string;
   qr_scanned_at: string | null;
@@ -42,9 +45,80 @@ export type DeliveryDetails = {
   city: string;
   province: string;
   postalCode: string;
+  deliveryDate?: string;
+  deliveryWindow?: string;
+};
+
+export type OrderRiskContext = {
+  idNumber?: string;
+  deviceFingerprint?: string;
+  clientGeo?: {
+    ip?: string;
+    city?: string;
+    province?: string;
+    country?: string;
+    postalCode?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    source?: string;
+  };
+  validatedAddress?: {
+    city?: string;
+    province?: string;
+    postalCode?: string;
+    latitude?: number | null;
+    longitude?: number | null;
+  };
+  otpVerified?: boolean;
+  saidVerified?: boolean;
 };
 
 export type DemoOrderDetail = { transaction: Transaction; details: unknown; audit: AuditEntry[] };
+export type RiskAssessment = {
+  score: number;
+  decision: "auto_approve" | "elevated_verification" | "manual_review_hold";
+  decisionLabel: string;
+  bandLabel: string;
+  recommendedPath: string;
+  factors: string[];
+  notes: string[];
+  ipAddress: string;
+  ipGeo: {
+    city: string;
+    province: string;
+    country: string;
+    postalCode: string;
+    latitude: number | null;
+    longitude: number | null;
+    source: string;
+  };
+  deliveryGeo: {
+    city: string;
+    province: string;
+    postalCode: string;
+    latitude: number | null;
+    longitude: number | null;
+  };
+  flags: {
+    ipMismatch: boolean;
+    highRiskZone: boolean;
+    highValue: boolean;
+    fingerprintPresent: boolean;
+    nonSouthAfricanIp: boolean;
+    underAge: boolean;
+  };
+  mismatchIsNormal: boolean;
+  identityRisk: {
+    birthDate: string | null;
+    age: number | null;
+    gender: "male" | "female" | null;
+    ageScore: number;
+    genderScore: number;
+    totalScore: number;
+    rejected: boolean;
+  } | null;
+  verifiedStatus: string;
+};
 export type DeliveryProcessStep = {
   index: number;
   title: string;
@@ -141,14 +215,34 @@ const API_BASE_URLS = Array.from(new Set([configuredApiBase, "", "http://localho
 const API_BASE_URL = API_BASE_URLS[0];
 
 function extractErrorMessage(status: number, data: unknown, text: string) {
+  let code = "";
   if (data && typeof data === "object") {
     const maybeError = (data as { error?: unknown; message?: unknown }).error;
     const maybeMessage = (data as { error?: unknown; message?: unknown }).message;
-    if (typeof maybeError === "string" && maybeError.trim()) return maybeError;
-    if (typeof maybeMessage === "string" && maybeMessage.trim()) return maybeMessage;
+    if (typeof maybeError === "string" && maybeError.trim()) code = maybeError.trim();
+    if (typeof maybeMessage === "string" && maybeMessage.trim()) return { code, message: maybeMessage.trim() };
+    if (code) return { code, message: code };
   }
-  if (text.trim()) return text.trim();
-  return `request_failed_${status}`;
+  if (text.trim()) return { code, message: text.trim() };
+  return { code: code || `request_failed_${status}`, message: `request_failed_${status}` };
+}
+
+function normalizeFetchFailure(error: unknown) {
+  if (error instanceof Error) {
+    const code =
+      typeof (error as { code?: unknown }).code === "string"
+        ? ((error as { code?: string }).code ?? "")
+        : "";
+    const normalized = error.message.toLowerCase();
+    if (normalized === "failed to fetch" || normalized.includes("fetch failed") || normalized.includes("networkerror")) {
+      return Object.assign(new Error("The service is temporarily unavailable. Please try again in a moment."), {
+        code: code || "service_unreachable",
+      });
+    }
+    return error;
+  }
+
+  return new Error("The service is temporarily unavailable. Please try again in a moment.");
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit & { token?: string }) {
@@ -189,18 +283,14 @@ async function apiFetch<T>(path: string, init?: RequestInit & { token?: string }
         throw nonJsonErr;
       }
 
-      const message = extractErrorMessage(res.status, data, rawText);
+      const { code, message } = extractErrorMessage(res.status, data, rawText);
 
       // Fallback to the next candidate when this backend does not expose the route.
       if ((res.status === 404 || res.status === 405 || res.status === 502 || res.status === 503 || res.status === 504) && hasNext) continue;
 
-      throw Object.assign(new Error(message), { status: res.status, data, baseUrl, path });
+      throw Object.assign(new Error(message), { status: res.status, data, baseUrl, path, code: code || message });
     } catch (error) {
-      if (error instanceof Error) {
-        lastError = error;
-      } else {
-        lastError = new Error("request_failed");
-      }
+      lastError = normalizeFetchFailure(error);
       if (hasNext) continue;
       throw lastError;
     }
@@ -283,9 +373,20 @@ export async function simulateDemoCredit(input: { saId: string; bureau: "transun
 
 export async function createDemoOrder(
   token: string,
-  input: { customerId: string; sessionId?: string; items: Array<{ productId: string; qty: number }>; delivery: DeliveryDetails; paymentMethod: PaymentMethod },
+  input: {
+    customerId: string;
+    sessionId?: string;
+    items: Array<{ productId: string; qty: number }>;
+    delivery: DeliveryDetails;
+    paymentMethod: PaymentMethod;
+    riskContext?: OrderRiskContext;
+  },
 ) {
-  return apiFetch<{ transaction: Transaction; qrPayload: string }>("/api/pondo/orders", { method: "POST", token, body: JSON.stringify(input) });
+  return apiFetch<{ transaction: Transaction; qrPayload: string; riskAssessment: RiskAssessment | null }>("/api/pondo/orders", {
+    method: "POST",
+    token,
+    body: JSON.stringify(input),
+  });
 }
 
 export async function bnplVetDemoOrder(token: string, id: string, input: { saId: string; bureau: "transunion" | "experian" }) {
@@ -412,6 +513,9 @@ export async function persistPondoRiskAssessment(
     experianIncome: number;
     fraudScore: number;
     approved: boolean;
+    projectedScore?: number;
+    projectedDecision?: "auto_approve" | "elevated_verification" | "manual_review_hold";
+    projectedFactors?: string[];
     city?: string;
     province?: string;
     postalCode?: string;

@@ -8,3 +8,5 @@ repo_push/
 devweb.err.log
 devweb.out.log
 api/.env.local
+.vercel
+.env*.local

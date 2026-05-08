@@ -1,0 +1,13 @@
+Record Name,Type,Content,TTL
+pondo-pay.online,SOA,ns1.clusterdns.co.za hostingservers@internet.co.za 2026050200 3600 1800 1209600 3600,3600
+pondo-pay.online,NS,ns1.clusterdns.co.za,86400
+pondo-pay.online,NS,ns2.clusterdns.co.za,86400
+pondo-pay.online,NS,ns3.hostdns.co.za,86400
+pondo-pay.online,NS,ns4.clusterdns.org,86400
+ftp.pondo-pay.online,A,156.155.252.30,14400
+mail.pondo-pay.online,A,156.155.252.30,14400
+pondo-pay.online,A,76.76.21.21,14400
+pondo-pay.online,TXT,"v=spf1 +a +mx +ip4:156.155.252.30 include:relay.mailchannels.net ~all",14400
+pondo-pay.online,MX,mx1.tld-mx.com,86400
+pondo-pay.online,MX,mx2.tld-mx.net,86400
+www.pondo-pay.online,CNAME,cname.vercel-dns.com,14400

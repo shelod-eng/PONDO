@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { getPool } from "./db";
+import { assessGeoRisk, deriveDeliveryLocation, lookupIpGeo, type ClientGeo, type ValidatedAddress } from "./risk";
 
 type PartnerName = "amazon" | "temu" | "takealot" | "woocommerce" | "shopify";
 type PaymentMethod =
@@ -97,6 +98,9 @@ type RecordRiskAssessmentInput = {
   experianIncome: number;
   fraudScore: number;
   approved: boolean;
+  projectedScore?: number;
+  projectedDecision?: "auto_approve" | "elevated_verification" | "manual_review_hold";
+  projectedFactors?: string[];
   city?: string;
   province?: string;
   postalCode?: string;
@@ -273,25 +277,6 @@ function randomCode(prefix: string, size = 5) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 2 + size)}`;
 }
 
-function deriveDeliveryLocation(address1: string, city: string, province: string, postalCode: string) {
-  const normalizedAddress = String(address1 || "").trim();
-  const tokens = normalizedAddress
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  const detectedPostalCode = postalCode.trim() || normalizedAddress.match(/\b\d{4}\b/)?.[0] || "";
-  const cleanedLastToken = tokens[tokens.length - 1]?.replace(/\b\d{4}\b/g, "").trim() || "";
-  const fallbackProvince = tokens.length >= 3 ? cleanedLastToken : "";
-  const fallbackCity = tokens.length >= 3 ? tokens[tokens.length - 2] : tokens.length === 2 ? tokens[tokens.length - 1] : "";
-
-  return {
-    city: city.trim() || fallbackCity,
-    province: province.trim() || fallbackProvince,
-    postalCode: detectedPostalCode,
-  };
-}
-
 function demoStockForCategory(category: string | null) {
   return category === "Fashion" ? 25 : 12;
 }
@@ -307,7 +292,7 @@ function maskDestination(channel: "sms" | "email", destination: string) {
 
 async function queryOne<T = Record<string, unknown>>(sql: string, values: unknown[] = []) {
   const pool = getPool();
-  const result = await pool.query<T>(sql, values);
+  const result = (await pool.query(sql, values)) as { rows: T[] };
   return result.rows[0] || null;
 }
 
@@ -702,6 +687,7 @@ async function getPaymentTransactionById(id: string) {
 
 async function mapTransaction(row: {
   id: string;
+  checkout_session_id?: string | null;
   customer_id: string;
   amount_cents: number;
   currency: string;
@@ -716,6 +702,7 @@ async function mapTransaction(row: {
   external_ref: string | null;
 }) {
   const email = await getPrimaryEmail(row.customer_id);
+  const risk = row.checkout_session_id ? await getLatestRiskAssessment(row.checkout_session_id) : null;
   return {
     id: row.id,
     customer_id: email,
@@ -725,6 +712,9 @@ async function mapTransaction(row: {
     gateway: row.gateway_code,
     gateway_status: row.gateway_status,
     credit_tier: null,
+    risk_score: risk?.score ?? null,
+    risk_decision: risk?.decision ?? null,
+    risk_level: risk?.decision ?? null,
     qr_payload: signedQrPayload({
       transactionId: row.id,
       amountCents: Number(row.amount_cents),
@@ -753,15 +743,7 @@ export async function listProducts(q?: string, category?: string) {
     filters.push(`lower(p.brand || ' ' || p.name) like $${values.length}`);
   }
 
-  const rows = await getPool().query<{
-    sku: string;
-    brand: string;
-    name: string;
-    category: string | null;
-    price_cents: number;
-    discount_pct: string | number | null;
-    merchant_name: string | null;
-  }>(
+  const rows = await getPool().query(
     `select p.sku,
             p.brand,
             p.name,
@@ -781,15 +763,25 @@ export async function listProducts(q?: string, category?: string) {
      where ${filters.join(" and ")}
      order by p.created_at asc, p.name asc`,
     values,
-  );
+  ) as {
+    rows: Array<{
+      sku: string;
+      brand: string;
+      name: string;
+      category: string | null;
+      price_cents: number;
+      discount_pct: string | number | null;
+      merchant_name: string | null;
+    }>;
+  };
 
-  const categories = await getPool().query<{ category: string }>(
+  const categories = (await getPool().query(
     `select distinct pc.name as category
      from ${table("products")} p
      left join ${table("product_categories")} pc on pc.id = p.category_id
      where p.is_active = true and pc.name is not null
      order by pc.name asc`,
-  );
+  )) as { rows: Array<{ category: string }> };
 
   return {
     items: rows.rows.map((row) => ({
@@ -1049,6 +1041,25 @@ export async function confirmCheckoutDetails(input: ConfirmCheckoutDetailsInput)
 export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
   const session = await getCheckoutSessionByCode(input.sessionId);
   if (!session) throw new Error("session_not_found");
+  const projectedDecision = input.projectedDecision || (input.approved ? "auto_approve" : "manual_review_hold");
+  const requiresManualReview = projectedDecision !== "auto_approve";
+  const score = typeof input.projectedScore === "number"
+    ? input.projectedScore
+    : input.screeningMode === "skip"
+      ? 18
+      : Math.max(
+          0,
+          Math.min(
+            200,
+            Math.round((input.transunionApproved ? 10 : 45) + input.fraudScore * 100 + (input.experianIncome < 15000 ? 30 : 10)),
+          ),
+        );
+  const persistedDecision = requiresManualReview ? "manual_review" : "auto_approve";
+  const persistedVerificationStatus = requiresManualReview
+    ? "kyc_and_id_verified"
+    : input.screeningMode === "skip"
+      ? "otp_verified"
+      : "kyc_and_id_verified";
 
   const caseRow = await queryOne<{ id: string }>(
     `insert into ${table("verification_cases")}
@@ -1059,23 +1070,11 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
       session.id,
       session.customer_id,
       input.screeningMode === "skip" ? "otp_only" : "full_kyc",
-      input.approved ? "approved" : "manual_review",
+      requiresManualReview ? "manual_review" : "approved",
     ],
   );
   if (!caseRow) throw new Error("verification_case_failed");
-
-  const score = input.screeningMode === "skip"
-    ? 18
-    : Math.max(
-        0,
-        Math.min(
-          200,
-          Math.round((input.transunionApproved ? 10 : 45) + input.fraudScore * 100 + (input.experianIncome < 15000 ? 30 : 10)),
-        ),
-      );
-  const decision = input.approved ? "auto_approve" : "manual_review";
   const band = score < 40 ? "low" : score < 70 ? "medium" : score < 100 ? "high" : "critical";
-  const verificationStatus = input.approved ? (input.screeningMode === "skip" ? "otp_verified" : "kyc_and_id_verified") : "failed";
 
   const assessment = await queryOne<{ id: string }>(
     `insert into ${table("risk_assessments")}
@@ -1086,11 +1085,11 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
       session.id,
       session.customer_id,
       score,
-      decision,
+      persistedDecision,
       band,
-      verificationStatus,
-      !input.approved,
-      input.approved ? "Automated screening approved checkout." : "Screening requires manual analyst review.",
+      persistedVerificationStatus,
+      requiresManualReview,
+      requiresManualReview ? "Screening requires manual analyst review." : "Automated screening approved checkout.",
       JSON.stringify({
         saIdHash: hashText(input.saId),
         bureau: input.bureau,
@@ -1099,6 +1098,9 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
         transunionApproved: input.transunionApproved,
         experianIncome: input.experianIncome,
         fraudScore: input.fraudScore,
+        projectedScore: score,
+        projectedDecision,
+        projectedFactors: input.projectedFactors || [],
       }),
     ],
   );
@@ -1133,7 +1135,7 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
       input.transunionApproved ? "approved" : "declined",
       input.bureau,
       input.experianIncome >= 15000 ? "approved" : "declined",
-      input.fraudScore <= 0.08 ? "approved" : "declined",
+      requiresManualReview ? "declined" : "approved",
     ],
   );
 
@@ -1159,9 +1161,9 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
     `insert into ${table("fraud_checks")}
       (verification_case_id, checkout_session_id, provider, fraud_score, result_status, response_payload)
      values ($1,$2,'pondo-python',$3,$4,$5)`,
-    [caseRow.id, session.id, input.fraudScore, input.fraudScore <= 0.08 ? "approved" : "declined", JSON.stringify({ fraudScore: input.fraudScore, city: input.city || "", province: input.province || "" })],
+    [caseRow.id, session.id, input.fraudScore, requiresManualReview ? "declined" : "approved", JSON.stringify({ fraudScore: input.fraudScore, city: input.city || "", province: input.province || "", projectedDecision, projectedFactors: input.projectedFactors || [] })],
   );
-  if (!input.approved) {
+  if (requiresManualReview) {
     await getPool().query(
       `insert into ${table("manual_review_cases")}
         (verification_case_id, queue_name, status, reason)
@@ -1177,7 +1179,7 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
          risk_completed_at = now(),
          updated_at = now()
      where id = $1`,
-    [session.id, input.approved ? "risk_approved" : "risk_failed"],
+    [session.id, requiresManualReview ? "risk_failed" : "risk_approved"],
   );
 
   await createAuditEvent({
@@ -1189,11 +1191,11 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
     resourceType: "risk_assessment",
     resourceId: assessment.id,
     action: "risk.assessed",
-    metadata: { decision, score, screeningMode: input.screeningMode },
+    metadata: { decision: projectedDecision, persistedDecision, score, screeningMode: input.screeningMode },
   });
-  await createCheckoutSessionEvent(session.id, "risk.assessed", input.actor, { decision, score });
+  await createCheckoutSessionEvent(session.id, "risk.assessed", input.actor, { decision: projectedDecision, score });
 
-  return { ok: true as const, approved: input.approved };
+  return { ok: true as const, approved: !requiresManualReview };
 }
 
 export function simulateCredit(saId: string, bureau: "transunion" | "experian") {
@@ -1206,8 +1208,17 @@ export async function createOrder(input: {
   customerEmail: string;
   sessionId?: string;
   items: Array<{ productId: string; qty: number }>;
-  delivery: { fullName: string; phone: string; address1: string; city: string; province: string; postalCode: string };
+  delivery: { fullName: string; phone: string; address1: string; city: string; province: string; postalCode: string; deliveryDate?: string; deliveryWindow?: string };
   paymentMethod: PaymentMethod;
+  riskContext?: {
+    idNumber?: string;
+    deviceFingerprint?: string;
+    clientGeo?: ClientGeo;
+    validatedAddress?: ValidatedAddress;
+    otpVerified?: boolean;
+    saidVerified?: boolean;
+  };
+  requestIp?: string;
 }) {
   const session = input.sessionId ? await getCheckoutSessionByCode(input.sessionId) : null;
   if (input.sessionId && !session) throw new Error("session_not_found");
@@ -1222,11 +1233,18 @@ export async function createOrder(input: {
   });
 
   const resolvedDelivery = deriveDeliveryLocation(input.delivery.address1, input.delivery.city, input.delivery.province, input.delivery.postalCode);
+  const validatedDelivery = {
+    city: input.riskContext?.validatedAddress?.city || resolvedDelivery.city,
+    province: input.riskContext?.validatedAddress?.province || resolvedDelivery.province,
+    postalCode: input.riskContext?.validatedAddress?.postalCode || resolvedDelivery.postalCode,
+    latitude: input.riskContext?.validatedAddress?.latitude ?? null,
+    longitude: input.riskContext?.validatedAddress?.longitude ?? null,
+  };
   const addressId = await upsertDefaultAddress(customer.id, {
     address1: input.delivery.address1,
-    city: resolvedDelivery.city,
-    province: resolvedDelivery.province,
-    postalCode: resolvedDelivery.postalCode,
+    city: validatedDelivery.city,
+    province: validatedDelivery.province,
+    postalCode: validatedDelivery.postalCode,
   });
 
   const products = await Promise.all(input.items.map((item) => getProductBySku(item.productId)));
@@ -1299,11 +1317,34 @@ export async function createOrder(input: {
     resourceType: "payment_transaction",
     resourceId: paymentTransactionId,
     action: "order.created",
-    metadata: { paymentMethod: input.paymentMethod, subtotal },
+    metadata: {
+      paymentMethod: input.paymentMethod,
+      subtotal,
+      deliveryDate: input.delivery.deliveryDate || null,
+      deliveryWindow: input.delivery.deliveryWindow || null,
+      requestIp: input.requestIp || null,
+      deviceFingerprintPresent: Boolean(input.riskContext?.deviceFingerprint),
+    },
   });
+
+  let inlineRisk = null;
+  if (input.riskContext) {
+    const ipGeo = await lookupIpGeo(input.requestIp || "", input.riskContext.clientGeo);
+    inlineRisk = assessGeoRisk({
+      ipAddress: input.requestIp || input.riskContext.clientGeo?.ip || "",
+      ipGeo,
+      deliveryGeo: validatedDelivery,
+      amountCents: subtotal,
+      deviceFingerprint: input.riskContext.deviceFingerprint,
+      idNumber: input.riskContext.idNumber,
+      otpVerified: input.riskContext.otpVerified,
+      saidVerified: input.riskContext.saidVerified,
+    });
+  }
 
   const mapped = await mapTransaction({
     id: paymentTransactionId,
+    checkout_session_id: session?.id || null,
     customer_id: customer.id,
     amount_cents: subtotal,
     currency: "ZAR",
@@ -1318,7 +1359,7 @@ export async function createOrder(input: {
     external_ref: null,
   });
 
-  return { transaction: mapped, qrPayload: mapped.qr_payload };
+  return { transaction: mapped, qrPayload: mapped.qr_payload, riskAssessment: inlineRisk };
 }
 
 export async function settleOrder(input: {
@@ -1502,13 +1543,13 @@ export async function getOrder(id: string) {
   const [order, items, audit] = await Promise.all([
     queryOne<Record<string, unknown>>(`select * from ${table("orders")} where id = $1 limit 1`, [transaction.order_id]),
     getPool().query(`select * from ${table("order_items")} where order_id = $1 order by id asc`, [transaction.order_id]),
-    getPool().query<{ at: string; actor: string | null; action: string; data: unknown }>(
+    getPool().query(
       `select occurred_at as at, actor_id as actor, action, metadata as data
        from ${table("audit_events")}
        where payment_transaction_id = $1
        order by occurred_at asc, id asc`,
       [transaction.id],
-    ),
+    ) as Promise<{ rows: Array<{ at: string; actor: string | null; action: string; data: unknown }> }>,
   ]);
 
   return {
@@ -1531,13 +1572,13 @@ export async function getDeliveryProcess(id: string) {
   );
   if (!process) return null;
 
-  const stepsResult = await getPool().query<{ step_index: number; title: string; detail: string }>(
+  const stepsResult = (await getPool().query(
     `select step_index, title, detail
      from ${table("delivery_process_steps")}
      where delivery_process_id = $1
      order by step_index asc`,
     [process.id],
-  );
+  )) as { rows: Array<{ step_index: number; title: string; detail: string }> };
 
   const startedAtMs = process.started_at ? new Date(process.started_at).getTime() : Date.now();
   const stepDurationMs = 6000;
@@ -1574,9 +1615,9 @@ export async function getDeliveryProcess(id: string) {
 }
 
 export async function sponsorSummary() {
-  const result = await getPool().query<{ status: string; amount_cents: number }>(
+  const result = (await getPool().query(
     `select status, amount_cents from ${table("payment_transactions")}`,
-  );
+  )) as { rows: Array<{ status: string; amount_cents: number }> };
   const items = result.rows;
   return {
     live: items.length,
@@ -1588,22 +1629,9 @@ export async function sponsorSummary() {
 }
 
 export async function sponsorOrders() {
-  const rows = await getPool().query<{
-    id: string;
-    customer_id: string;
-    amount_cents: number;
-    currency: string;
-    status: string;
-    gateway_code: string;
-    gateway_status: string;
-    reconciled_at: string | null;
-    settled_at: string | null;
-    created_at: string;
-    updated_at: string;
-    external_ref: string | null;
-    payment_method_code: PaymentMethod;
-  }>(
+  const rows = (await getPool().query(
     `select pt.id,
+            pt.checkout_session_id,
             pt.customer_id,
             pt.amount_cents,
             pt.currency,
@@ -1619,7 +1647,24 @@ export async function sponsorOrders() {
      from ${table("payment_transactions")} pt
      join ${table("payment_methods")} pm on pm.id = pt.payment_method_id
      order by pt.created_at desc`,
-  );
+  )) as {
+    rows: Array<{
+      id: string;
+      checkout_session_id: string | null;
+      customer_id: string;
+      amount_cents: number;
+      currency: string;
+      status: string;
+      gateway_code: string;
+      gateway_status: string;
+      reconciled_at: string | null;
+      settled_at: string | null;
+      created_at: string;
+      updated_at: string;
+      external_ref: string | null;
+      payment_method_code: PaymentMethod;
+    }>;
+  };
 
   const items = await Promise.all(rows.rows.map((row) => mapTransaction(row)));
   return { items };

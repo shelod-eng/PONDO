@@ -846,45 +846,70 @@ ALTER TABLE idempotency_keys ENABLE ROW LEVEL SECURITY;
 ALTER TABLE integration_credentials_meta ENABLE ROW LEVEL SECURITY;
 ALTER TABLE schema_migrations_meta ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY service_all_auth_users ON auth_users FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_customer_profiles ON customer_profiles FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_customer_contact_methods ON customer_contact_methods FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_customer_addresses ON customer_addresses FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_customer_devices ON customer_devices FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_customer_consents ON customer_consents FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_partner_customer_profiles ON partner_customer_profiles FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_carts ON carts FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_cart_items ON cart_items FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_checkout_sessions ON checkout_sessions FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_checkout_session_events ON checkout_session_events FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_orders ON orders FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_order_items ON order_items FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_order_status_history ON order_status_history FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_otp_challenges ON otp_challenges FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_verification_cases ON verification_cases FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_verification_steps ON verification_steps FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_risk_assessments ON risk_assessments FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_risk_signals ON risk_signals FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_kyc_checks ON kyc_checks FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_credit_checks ON credit_checks FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_fraud_checks ON fraud_checks FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_affordability_checks ON affordability_checks FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_manual_review_cases ON manual_review_cases FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_payment_transactions ON payment_transactions FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_payment_events ON payment_events FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_payment_settlements ON payment_settlements FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_refunds ON refunds FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_chargebacks ON chargebacks FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_wallet_accounts ON wallet_accounts FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_wallet_ledger_entries ON wallet_ledger_entries FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_delivery_processes ON delivery_processes FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_delivery_process_steps ON delivery_process_steps FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_shipment_events ON shipment_events FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_notifications ON notifications FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_notification_attempts ON notification_attempts FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_audit_events ON audit_events FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_data_access_logs ON data_access_logs FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_outbox_events ON outbox_events FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_idempotency_keys ON idempotency_keys FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_integration_credentials_meta ON integration_credentials_meta FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY service_all_schema_migrations_meta ON schema_migrations_meta FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+CREATE OR REPLACE FUNCTION pondo_core.ensure_service_role_policy(target_table text, policy_name text)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'pondo_core'
+      AND tablename = target_table
+      AND policyname = policy_name
+  ) THEN
+    EXECUTE format(
+      'CREATE POLICY %I ON pondo_core.%I FOR ALL USING (auth.role() = %L) WITH CHECK (auth.role() = %L)',
+      policy_name,
+      target_table,
+      'service_role',
+      'service_role'
+    );
+  END IF;
+END;
+$$;
+
+SELECT pondo_core.ensure_service_role_policy('auth_users', 'service_all_auth_users');
+SELECT pondo_core.ensure_service_role_policy('customer_profiles', 'service_all_customer_profiles');
+SELECT pondo_core.ensure_service_role_policy('customer_contact_methods', 'service_all_customer_contact_methods');
+SELECT pondo_core.ensure_service_role_policy('customer_addresses', 'service_all_customer_addresses');
+SELECT pondo_core.ensure_service_role_policy('customer_devices', 'service_all_customer_devices');
+SELECT pondo_core.ensure_service_role_policy('customer_consents', 'service_all_customer_consents');
+SELECT pondo_core.ensure_service_role_policy('partner_customer_profiles', 'service_all_partner_customer_profiles');
+SELECT pondo_core.ensure_service_role_policy('carts', 'service_all_carts');
+SELECT pondo_core.ensure_service_role_policy('cart_items', 'service_all_cart_items');
+SELECT pondo_core.ensure_service_role_policy('checkout_sessions', 'service_all_checkout_sessions');
+SELECT pondo_core.ensure_service_role_policy('checkout_session_events', 'service_all_checkout_session_events');
+SELECT pondo_core.ensure_service_role_policy('orders', 'service_all_orders');
+SELECT pondo_core.ensure_service_role_policy('order_items', 'service_all_order_items');
+SELECT pondo_core.ensure_service_role_policy('order_status_history', 'service_all_order_status_history');
+SELECT pondo_core.ensure_service_role_policy('otp_challenges', 'service_all_otp_challenges');
+SELECT pondo_core.ensure_service_role_policy('verification_cases', 'service_all_verification_cases');
+SELECT pondo_core.ensure_service_role_policy('verification_steps', 'service_all_verification_steps');
+SELECT pondo_core.ensure_service_role_policy('risk_assessments', 'service_all_risk_assessments');
+SELECT pondo_core.ensure_service_role_policy('risk_signals', 'service_all_risk_signals');
+SELECT pondo_core.ensure_service_role_policy('kyc_checks', 'service_all_kyc_checks');
+SELECT pondo_core.ensure_service_role_policy('credit_checks', 'service_all_credit_checks');
+SELECT pondo_core.ensure_service_role_policy('fraud_checks', 'service_all_fraud_checks');
+SELECT pondo_core.ensure_service_role_policy('affordability_checks', 'service_all_affordability_checks');
+SELECT pondo_core.ensure_service_role_policy('manual_review_cases', 'service_all_manual_review_cases');
+SELECT pondo_core.ensure_service_role_policy('payment_transactions', 'service_all_payment_transactions');
+SELECT pondo_core.ensure_service_role_policy('payment_events', 'service_all_payment_events');
+SELECT pondo_core.ensure_service_role_policy('payment_settlements', 'service_all_payment_settlements');
+SELECT pondo_core.ensure_service_role_policy('refunds', 'service_all_refunds');
+SELECT pondo_core.ensure_service_role_policy('chargebacks', 'service_all_chargebacks');
+SELECT pondo_core.ensure_service_role_policy('wallet_accounts', 'service_all_wallet_accounts');
+SELECT pondo_core.ensure_service_role_policy('wallet_ledger_entries', 'service_all_wallet_ledger_entries');
+SELECT pondo_core.ensure_service_role_policy('delivery_processes', 'service_all_delivery_processes');
+SELECT pondo_core.ensure_service_role_policy('delivery_process_steps', 'service_all_delivery_process_steps');
+SELECT pondo_core.ensure_service_role_policy('shipment_events', 'service_all_shipment_events');
+SELECT pondo_core.ensure_service_role_policy('notifications', 'service_all_notifications');
+SELECT pondo_core.ensure_service_role_policy('notification_attempts', 'service_all_notification_attempts');
+SELECT pondo_core.ensure_service_role_policy('audit_events', 'service_all_audit_events');
+SELECT pondo_core.ensure_service_role_policy('data_access_logs', 'service_all_data_access_logs');
+SELECT pondo_core.ensure_service_role_policy('outbox_events', 'service_all_outbox_events');
+SELECT pondo_core.ensure_service_role_policy('idempotency_keys', 'service_all_idempotency_keys');
+SELECT pondo_core.ensure_service_role_policy('integration_credentials_meta', 'service_all_integration_credentials_meta');
+SELECT pondo_core.ensure_service_role_policy('schema_migrations_meta', 'service_all_schema_migrations_meta');
+
+DROP FUNCTION pondo_core.ensure_service_role_policy(text, text);

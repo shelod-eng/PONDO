@@ -1,0 +1,51 @@
+<svg width="900" height="620" viewBox="0 0 900 620" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="900" height="620" fill="#FAF6EE"/>
+  <g opacity="0.22" stroke="#14326A" stroke-width="1">
+    <path d="M0 62H900"/>
+    <path d="M0 124H900"/>
+    <path d="M0 186H900"/>
+    <path d="M0 248H900"/>
+    <path d="M0 310H900"/>
+    <path d="M0 372H900"/>
+    <path d="M0 434H900"/>
+    <path d="M0 496H900"/>
+    <path d="M0 558H900"/>
+    <path d="M90 0V620"/>
+    <path d="M180 0V620"/>
+    <path d="M270 0V620"/>
+    <path d="M360 0V620"/>
+    <path d="M450 0V620"/>
+    <path d="M540 0V620"/>
+    <path d="M630 0V620"/>
+    <path d="M720 0V620"/>
+    <path d="M810 0V620"/>
+  </g>
+
+  <g stroke-width="5" fill="none">
+    <circle cx="360" cy="210" r="135" stroke="#183267"/>
+    <circle cx="360" cy="210" r="120" stroke="#183267"/>
+    <circle cx="360" cy="210" r="105" stroke="#183267"/>
+
+    <circle cx="270" cy="290" r="135" stroke="#6EA2C8"/>
+    <circle cx="270" cy="290" r="120" stroke="#6EA2C8"/>
+    <circle cx="270" cy="290" r="105" stroke="#6EA2C8"/>
+
+    <circle cx="450" cy="290" r="135" stroke="#B87553"/>
+    <circle cx="450" cy="290" r="120" stroke="#B87553"/>
+    <circle cx="450" cy="290" r="105" stroke="#B87553"/>
+
+    <circle cx="360" cy="370" r="135" stroke="#183267"/>
+    <circle cx="360" cy="370" r="120" stroke="#183267"/>
+    <circle cx="360" cy="370" r="105" stroke="#183267"/>
+  </g>
+
+  <g opacity="0.3" stroke="#183267" stroke-width="2">
+    <path d="M170 60V470"/>
+    <path d="M550 60V470"/>
+    <path d="M110 250H610"/>
+    <path d="M110 220H610"/>
+  </g>
+
+  <text x="52" y="540" fill="#14326A" font-family="Arial, Helvetica, sans-serif" font-size="54" font-weight="800">PONDO: The Trust Enabler</text>
+  <text x="76" y="590" fill="#14326A" font-family="Arial, Helvetica, sans-serif" font-size="28">Bridging Payments, Deliveries, and Cash in E-Commerce</text>
+</svg>

@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { httpLogger } from "./logger.js";
-import { config } from "./config.js";
+import { appConfig } from "./config.js";
 import { signToken, requireAuth, requireRole } from "./auth.js";
 import { createSignedPayload, verifySignedPayload } from "./qr.js";
 import { createStorage } from "./storage/index.js";
@@ -22,7 +22,7 @@ app.use(httpLogger);
 const storage = createStorage();
 await storage.init();
 const eventHub = createEventHub();
-const orderService = createOrderService({ storage, eventHub, secret: config.jwtSecret });
+const orderService = createOrderService({ storage, eventHub, secret: appConfig.jwtSecret });
 const authUsers = new Map(
   [
     { username: "customer@example.com", password: "demo", role: "customer" },
@@ -42,7 +42,7 @@ function pickGateway({ paymentMethod, gateway }) {
   return pickGatewayForPaymentMethod(paymentMethod, gateway);
 }
 
-app.get("/healthz", (req, res) => res.json({ ok: true, name: "pondo-api", env: config.nodeEnv }));
+app.get("/healthz", (req, res) => res.json({ ok: true, name: "pondo-api", env: appConfig.nodeEnv }));
 
 // --- PONDO Demo eCommerce API (used by /PondoDemo in the web app) ---
 app.get("/api/pondo/catalog/products", (req, res) => {
@@ -356,7 +356,7 @@ app.post("/api/checkout/initiate", requireAuth, requireRole(["customer", "sponso
   const { customerId, amountCents, currency, paymentMethod } = parsed.data;
   const gateway = pickGateway({ paymentMethod, gateway: req.body.gateway });
   const transactionId = storage.newId();
-  const qrPayload = createSignedPayload({ transactionId, amountCents, currency, customerId }, config.jwtSecret);
+  const qrPayload = createSignedPayload({ transactionId, amountCents, currency, customerId }, appConfig.jwtSecret);
 
   const tx = await storage.createTransaction({
     id: transactionId,
@@ -393,7 +393,7 @@ app.post("/api/checkout/:id/scan", requireAuth, requireRole(["customer", "sponso
 
   let verified;
   try {
-    verified = verifySignedPayload(payload, config.jwtSecret);
+    verified = verifySignedPayload(payload, appConfig.jwtSecret);
   } catch {
     return res.status(400).json({ error: "invalid_payload" });
   }
@@ -518,7 +518,7 @@ app.use((err, req, res, next) => {
   return res.status(500).json({ error: "internal_error" });
 });
 
-app.listen(config.port, () => {
+app.listen(appConfig.port, () => {
   // eslint-disable-next-line no-console
-  console.log(`pondo-api listening on http://localhost:${config.port}`);
+  console.log(`pondo-api listening on http://localhost:${appConfig.port}`);
 });

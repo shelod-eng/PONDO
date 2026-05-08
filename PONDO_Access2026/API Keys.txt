@@ -1,0 +1,32 @@
+I’ve removed the newer preview deployments I created and confirmed your original deployment is still the one behind:
+
+https://project-vo39d-mpetalebo-2457-pondo1.vercel.app
+Original deployment ID: 9N6BztZRj
+I also removed the extra failed preview by ID. Vercel’s list is still showing that one stale entry in the table, but the actual original deployment is confirmed and intact:
+
+underlying original preview: https://project-vo39d-bgkx158ab-pondo1.vercel.app
+ID: dpl_9N6BztZRjoehbAxCLhZhpxjwuiCo
+At this point I will stop making any new deployment changes.
+=============================================
+I am happy that we can write to the database - however I see you've also copied old features which in my last build I told you to remove, 
+1 - image 1 and 2 need to be removed  from the Checkout page, On confirm your details the  (OTP Verification (Twilio SMS / SendGrid Email)) 
+needs to be removed from this screen as well as image 2 on Confirm your details screen, now the OTP Verification (Twilio SMS / SendGrid Email)
+ should be the 3rd screen - this recent build should have the functionality of the last working build and still write to the database - Last features that worked was ID: 8ZbzsKZMT - please just copy everything that was on Deployment ID: 8ZbzsKZMT and make sure the new deployment has the features and functionality of
+ Deployment ID: 8ZbzsKZMT and make sure that we can write to that database.
+ 
+ https://ccp.axxess.co.za/user/billing-info
+ 
+ PONDO-API-KEY
+ AIzaSyASO_FnptOtJ1thu3_XZTeM48R0CrbtA-c
+ 
+ GOOGLE_MAPS_API_KEY = AIzaSyCrmzwwg7vJK1FDPbxP5MSIKwpvFxBe9Pw
+ NEXT_PUBLIC_GOOGLE_MAPS_API_KEY = AIzaSyCrmzwwg7vJK1FDPbxP5MSIKwpvFxBe9Pw
+ 
+Status summary:
+
+Single visible address field: working
+Vercel env vars: working
+Google API key pickup: working
+Places API enabled: yes
+Address Validation API enabled: yes
+Billing on Google Cloud: still required

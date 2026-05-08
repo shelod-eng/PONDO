@@ -1,10 +1,12 @@
 export type GeoLocation = {
+  ip?: string;
   city: string;
   province: string;
   country: string;
   postalCode: string;
   latitude: number;
   longitude: number;
+  source?: string;
 };
 
 /**
@@ -23,12 +25,14 @@ export async function fetchGeoLocation(): Promise<GeoLocation | null> {
       if (response.ok) {
         const data = await response.json();
         return {
+          ip: data.ip || "",
           city: data.city || "Unknown",
           province: data.region || data.region_code || "Unknown",
           country: data.country_name || "South Africa",
           postalCode: data.postal || "0000",
           latitude: data.latitude || 0,
           longitude: data.longitude || 0,
+          source: "ipapi",
         };
       }
     } catch (e) {
@@ -45,12 +49,14 @@ export async function fetchGeoLocation(): Promise<GeoLocation | null> {
       if (response.ok) {
         const data = await response.json();
         return {
+          ip: data.IPv4 || "",
           city: data.city || "Unknown",
           province: data.state || "Unknown",
           country: data.country_name || "South Africa",
           postalCode: data.postal || "0000",
           latitude: data.latitude || 0,
           longitude: data.longitude || 0,
+          source: "geolocation-db",
         };
       }
     } catch (e) {
@@ -59,12 +65,14 @@ export async function fetchGeoLocation(): Promise<GeoLocation | null> {
 
     // Last fallback: default to Johannesburg, Gauteng
     return {
+      ip: "",
       city: "Johannesburg",
       province: "Gauteng",
       country: "South Africa",
       postalCode: "2000",
       latitude: -26.1676,
       longitude: 28.0567,
+      source: "default",
     };
   } catch (e) {
     console.error("Geolocation fetch failed:", e);

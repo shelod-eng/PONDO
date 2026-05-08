@@ -1,0 +1,56 @@
+<svg width="1400" height="820" viewBox="0 0 1400 820" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1400" height="820" fill="#F9F5EC"/>
+  <g opacity="0.18" stroke="#183267" stroke-width="1">
+    <path d="M0 40H1400"/><path d="M0 80H1400"/><path d="M0 120H1400"/><path d="M0 160H1400"/><path d="M0 200H1400"/><path d="M0 240H1400"/><path d="M0 280H1400"/><path d="M0 320H1400"/><path d="M0 360H1400"/><path d="M0 400H1400"/><path d="M0 440H1400"/><path d="M0 480H1400"/><path d="M0 520H1400"/><path d="M0 560H1400"/><path d="M0 600H1400"/><path d="M0 640H1400"/><path d="M0 680H1400"/><path d="M0 720H1400"/><path d="M0 760H1400"/>
+    <path d="M40 0V820"/><path d="M80 0V820"/><path d="M120 0V820"/><path d="M160 0V820"/><path d="M200 0V820"/><path d="M240 0V820"/><path d="M280 0V820"/><path d="M320 0V820"/><path d="M360 0V820"/><path d="M400 0V820"/><path d="M440 0V820"/><path d="M480 0V820"/><path d="M520 0V820"/><path d="M560 0V820"/><path d="M600 0V820"/><path d="M640 0V820"/><path d="M680 0V820"/><path d="M720 0V820"/><path d="M760 0V820"/><path d="M800 0V820"/><path d="M840 0V820"/><path d="M880 0V820"/><path d="M920 0V820"/><path d="M960 0V820"/><path d="M1000 0V820"/><path d="M1040 0V820"/><path d="M1080 0V820"/><path d="M1120 0V820"/><path d="M1160 0V820"/><path d="M1200 0V820"/><path d="M1240 0V820"/><path d="M1280 0V820"/><path d="M1320 0V820"/><path d="M1360 0V820"/>
+  </g>
+  <text x="52" y="82" fill="#102A5C" font-family="Arial, Helvetica, sans-serif" font-size="66" font-weight="800">The cost of broken trust in</text>
+  <text x="52" y="154" fill="#102A5C" font-family="Arial, Helvetica, sans-serif" font-size="66" font-weight="800">low-infrastructure environments</text>
+  <path d="M0 305H316" stroke="#183267" stroke-width="4"/>
+  <path d="M1092 305H1400" stroke="#183267" stroke-width="4"/>
+  <path d="M332 305V404H365L382 338H1018L1036 404H1068V305" stroke="#183267" stroke-width="5" fill="none"/>
+  <path d="M379 338L696 356" stroke="#183267" stroke-width="4"/>
+  <path d="M1022 338L704 356" stroke="#183267" stroke-width="4"/>
+  <path d="M410 370L645 390" stroke="#183267" stroke-width="5"/>
+  <path d="M990 370L755 390" stroke="#183267" stroke-width="5"/>
+  <path d="M377 404C430 404 464 466 489 533C533 651 600 732 700 732C800 732 867 651 911 533C936 466 970 404 1023 404" stroke="#183267" stroke-width="5" fill="none"/>
+  <path d="M437 404C492 436 536 534 559 612" stroke="#183267" stroke-width="4"/>
+  <path d="M963 404C908 436 864 534 841 612" stroke="#183267" stroke-width="4"/>
+  <path d="M644 382L672 400" stroke="#183267" stroke-width="5"/><path d="M674 374L699 394" stroke="#183267" stroke-width="5"/><path d="M712 376L688 396" stroke="#183267" stroke-width="5"/><path d="M740 382L711 400" stroke="#183267" stroke-width="5"/>
+  <path d="M648 392L635 423" stroke="#183267" stroke-width="4"/><path d="M693 404L687 436" stroke="#183267" stroke-width="4"/><path d="M731 394L744 425" stroke="#183267" stroke-width="4"/>
+  <circle cx="628" cy="448" r="5" fill="#183267"/><circle cx="684" cy="454" r="5" fill="#183267"/><circle cx="751" cy="445" r="5" fill="#183267"/>
+  <rect x="618" y="503" width="174" height="112" rx="8" fill="#FFF8EF" stroke="#C56D3C" stroke-width="6"/>
+  <rect x="631" y="516" width="148" height="86" rx="6" fill="#FFF8EF" stroke="#D6B29A" stroke-width="2"/>
+  <text x="705" y="551" text-anchor="middle" fill="#1F2230" font-family="Comic Sans MS, Bradley Hand, cursive" font-size="25">what is the cost</text>
+  <text x="705" y="581" text-anchor="middle" fill="#1F2230" font-family="Comic Sans MS, Bradley Hand, cursive" font-size="25">of fraud to</text>
+  <text x="705" y="611" text-anchor="middle" fill="#1F2230" font-family="Comic Sans MS, Bradley Hand, cursive" font-size="25">ecommerce use?</text>
+  <path d="M587 520L531 479L558 470" stroke="#183267" stroke-width="5" fill="none"/><path d="M587 520L553 514" stroke="#183267" stroke-width="5"/>
+  <path d="M823 520L879 479L852 470" stroke="#183267" stroke-width="5" fill="none"/><path d="M823 520L857 514" stroke="#183267" stroke-width="5"/>
+  <g transform="translate(120 184)">
+    <path d="M0 0H33L43 28H98" stroke="#183267" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="47" cy="58" r="12" stroke="#183267" stroke-width="6"/>
+    <circle cx="86" cy="58" r="12" stroke="#183267" stroke-width="6"/>
+    <circle cx="118" cy="6" r="18" stroke="#183267" stroke-width="6"/>
+    <text x="118" y="13" text-anchor="middle" fill="#183267" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="700">e</text>
+  </g>
+  <g transform="translate(1240 153)">
+    <rect x="0" y="0" width="72" height="118" stroke="#183267" stroke-width="6"/>
+    <rect x="16" y="17" width="14" height="32" stroke="#183267" stroke-width="4"/>
+    <rect x="42" y="17" width="14" height="32" stroke="#183267" stroke-width="4"/>
+    <rect x="16" y="60" width="14" height="32" stroke="#183267" stroke-width="4"/>
+    <path d="M57 92V118" stroke="#183267" stroke-width="4"/>
+  </g>
+  <text x="175" y="365" fill="#6D7B94" font-family="Arial, Helvetica, sans-serif" font-size="28" text-anchor="middle">Digital</text>
+  <text x="175" y="403" fill="#6D7B94" font-family="Arial, Helvetica, sans-serif" font-size="28" text-anchor="middle">E-Commerce</text>
+  <text x="175" y="441" fill="#6D7B94" font-family="Arial, Helvetica, sans-serif" font-size="28" text-anchor="middle">Cart</text>
+  <text x="1252" y="365" fill="#6D7B94" font-family="Arial, Helvetica, sans-serif" font-size="28" text-anchor="middle">Physical</text>
+  <text x="1252" y="403" fill="#6D7B94" font-family="Arial, Helvetica, sans-serif" font-size="28" text-anchor="middle">Reality</text>
+  <text x="182" y="674" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700">Adoption barriers:</text>
+  <text x="182" y="702" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">Infrastructure gaps</text>
+  <text x="182" y="728" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">that prevent seamless</text>
+  <text x="182" y="754" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">verification.</text>
+  <text x="1080" y="674" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700">Connectivity limitations:</text>
+  <text x="1080" y="702" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">Device constraints</text>
+  <text x="1080" y="728" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">blocking field</text>
+  <text x="1080" y="754" fill="#111827" font-family="Arial, Helvetica, sans-serif" font-size="18">transactions.</text>
+</svg>
