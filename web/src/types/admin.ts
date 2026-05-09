@@ -56,6 +56,55 @@ export interface KycAuditRecord {
   amount: number;
 }
 
+export interface AdminManualReviewSummary {
+  open: number;
+  assigned: number;
+  resolved: number;
+  latestOpenedAt: string | null;
+}
+
+export interface AdminSettlementSummary {
+  reconciledCount: number;
+  pendingCount: number;
+  reconciledGross: number;
+  settledNet: number;
+  latestSettledAt: string | null;
+}
+
+export interface AdminManualReviewQueueItem {
+  id: string;
+  customer: string;
+  reason: string;
+  riskDecision: string;
+  amount: number;
+  product: string;
+  queue: string;
+  status: string;
+  openedAt: string;
+}
+
+export interface AdminOrderStatusItem {
+  status: string;
+  count: number;
+  amount: number;
+}
+
+export interface AdminDashboardData {
+  kpis: KpiMetric[];
+  recentTransactions: CheckoutRecord[];
+  kycAuditRecords: KycAuditRecord[];
+  manualReview: AdminManualReviewSummary;
+  manualReviewQueue: AdminManualReviewQueueItem[];
+  orderStatuses: AdminOrderStatusItem[];
+  settlement: AdminSettlementSummary;
+  txVolumeData: TxVolumePoint[];
+  kycPieData: KycPieSlice[];
+  kycTrendData: KycTrendPoint[];
+  revenueTrendData: RevenueTrendPoint[];
+  partnerPerformanceData: PartnerPerformancePoint[];
+  generatedAt: string;
+}
+
 export interface DriverAssignment {
   driverId: string;
   name: string;
