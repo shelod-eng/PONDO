@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PondoDemoNav } from "@/components/PondoDemoNav";
 import {
+  analyzeManualReviewDocuments,
   autocompleteAddress,
   confirmPondoCheckoutDetails,
   createDemoOrder,
@@ -18,6 +19,7 @@ import {
   type AddressSuggestion,
   type AddressValidationResult,
   type DemoProduct,
+  type DocumentAnalysisResult,
   type PaymentSettlement,
   type PartnerBootstrapSession,
   type PartnerName,
@@ -72,6 +74,7 @@ type SelectedDocument = {
   fileName: string;
   fileSize: number;
   mimeType: string;
+  base64Data: string;
 };
 
 const DEMO_CUSTOMER_PROFILES: DemoCustomerProfile[] = [
@@ -262,6 +265,7 @@ function buildReviewAssistantSummary(input: {
   hasIdentityDocument: boolean;
   hasProofOfAddress: boolean;
   identityDocumentType: IdentityDocumentType;
+  documentAnalysis?: DocumentAnalysisResult | null;
 }) {
   const reasons = [
     input.hasIdentityDocument
@@ -269,6 +273,7 @@ function buildReviewAssistantSummary(input: {
       : "Primary identity document still missing",
     input.hasProofOfAddress ? "Proof of address uploaded" : "Proof of address still missing",
     typeof input.score === "number" ? `Composite risk score recorded at ${input.score}` : "Composite risk score pending",
+    ...(input.documentAnalysis?.recommendation.reasons || []),
   ];
 
   const recommendation =
@@ -276,14 +281,19 @@ function buildReviewAssistantSummary(input: {
       ? "approved"
       : input.reviewStatus === "declined"
         ? "declined"
+        : input.documentAnalysis?.recommendation.decision === "decline"
+          ? "decline"
+          : input.documentAnalysis?.recommendation.decision === "approve"
+            ? "approve"
         : input.hasIdentityDocument && input.hasProofOfAddress && input.decision === "manual_review_hold"
           ? "approve"
           : "decline";
 
   const summary =
-    recommendation === "approve" || recommendation === "approved"
+    input.documentAnalysis?.recommendation.summary ||
+    (recommendation === "approve" || recommendation === "approved"
       ? `AI review assistant recommends approval for ${input.fullName} because the required supporting documents have been received and the case is ready for fulfilment release.`
-      : `AI review assistant recommends decline or continued hold for ${input.fullName} because the case is incomplete or still presents unresolved review concerns.`;
+      : `AI review assistant recommends decline or continued hold for ${input.fullName} because the case is incomplete or still presents unresolved review concerns.`);
 
   return { recommendation, summary, reasons };
 }
@@ -492,6 +502,7 @@ export default function PondoCheckoutPage() {
   const [identityDocumentType, setIdentityDocumentType] = useState<IdentityDocumentType>("sa_id");
   const [identityDocument, setIdentityDocument] = useState<SelectedDocument | null>(null);
   const [proofOfAddressDocument, setProofOfAddressDocument] = useState<SelectedDocument | null>(null);
+  const [documentAnalysis, setDocumentAnalysis] = useState<DocumentAnalysisResult | null>(null);
   const [reviewAssistantOpen, setReviewAssistantOpen] = useState(false);
   const [, setApiLogs] = useState<string[]>(["Awaiting transaction initiation..."]);
 
@@ -662,12 +673,37 @@ export default function PondoCheckoutPage() {
     setApiLogs((prev) => [`${ts()} ${message}`, ...prev].slice(0, 40));
   }
 
-  function rememberSelectedDocument(file: File | null) {
+  function isPdfDocument(document: SelectedDocument | null | undefined) {
+    if (!document) return false;
+    return document.mimeType === "application/pdf" || document.fileName.toLowerCase().endsWith(".pdf");
+  }
+
+  function shouldRetryDocumentAnalysisWithoutProof(error: unknown, proofDocument: SelectedDocument | null) {
+    if (!proofDocument || !isPdfDocument(proofDocument)) return false;
+    if (!(error instanceof Error)) return false;
+    const status = "status" in error && typeof error.status === "number" ? error.status : null;
+    return status === 400 || status === 413;
+  }
+
+  async function rememberSelectedDocument(file: File | null) {
     if (!file) return null;
+    const base64Data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          resolve(reader.result);
+          return;
+        }
+        reject(new Error("document_encoding_failed"));
+      };
+      reader.onerror = () => reject(reader.error || new Error("document_encoding_failed"));
+      reader.readAsDataURL(file);
+    });
     return {
       fileName: file.name,
       fileSize: file.size,
       mimeType: file.type || "application/octet-stream",
+      base64Data,
     };
   }
 
@@ -707,6 +743,7 @@ export default function PondoCheckoutPage() {
       setIdentityDocumentType("sa_id");
       setIdentityDocument(null);
       setProofOfAddressDocument(null);
+      setDocumentAnalysis(null);
       setProcessingMessage("");
       setStep(2);
       log(`Partner profile fetched: ${out.session.product.name} @ ${money(out.session.product.priceCents)}`);
@@ -919,7 +956,7 @@ export default function PondoCheckoutPage() {
     return result;
   }
 
-  async function completeApprovedPurchase() {
+  async function completeApprovedPurchase(analysisOverride?: DocumentAnalysisResult | null) {
     if (!session || !customer || !cartLines.length) throw new Error("checkout_incomplete");
 
     const submitWithToken = async (authToken: string) => {
@@ -967,6 +1004,7 @@ export default function PondoCheckoutPage() {
             proofOfAddressRequired: requiresProofOfAddress,
             proofOfAddressUploaded: Boolean(proofOfAddressDocument),
             proofOfAddressFileName: proofOfAddressDocument?.fileName,
+            documentAnalysis: analysisOverride ?? documentAnalysis,
           },
           otpVerified: true,
           saidVerified: isSaidValid,
@@ -1041,6 +1079,7 @@ export default function PondoCheckoutPage() {
           proofOfAddressRequired: requiresProofOfAddress,
           proofOfAddressUploaded: Boolean(proofOfAddressDocument),
           proofOfAddressFileName: proofOfAddressDocument?.fileName,
+          documentAnalysis,
         },
         projectedScore: projectedRisk.score,
         projectedDecision: projectedRisk.decision,
@@ -1081,9 +1120,54 @@ export default function PondoCheckoutPage() {
       return;
     }
     setBusy(true);
-    setProcessingMessage("All checks passed. Writing the order to Supabase...");
+    setProcessingMessage(
+      requiresManualReviewDocuments
+        ? "Analyzing uploaded documents and preparing the analyst review summary..."
+        : "All checks passed. Writing the order to Supabase...",
+    );
     try {
-      await completeApprovedPurchase();
+      let latestDocumentAnalysis = documentAnalysis;
+      if (requiresManualReviewDocuments && identityDocument) {
+        const authToken = await ensureCustomerAuth(true, capturedEmail || customer?.email);
+        const analysisInput = {
+          identityDocumentType,
+          fullName: capturedFullName,
+          enteredIdNumber: normalizedIdNumber,
+          deliveryAddress: {
+            address1: capturedAddress,
+            city: capturedCity,
+            province: capturedProvince,
+            postalCode: capturedPostalCode,
+          },
+          clientGeo: clientGeo
+            ? {
+                city: clientGeo.city,
+                province: clientGeo.province,
+                country: clientGeo.country,
+              }
+            : undefined,
+          orderValueCents: cartSubtotalCents,
+          identityDocument,
+          proofOfAddressDocument,
+        } as const;
+
+        try {
+          latestDocumentAnalysis = await analyzeManualReviewDocuments(authToken, analysisInput);
+        } catch (error) {
+          if (!shouldRetryDocumentAnalysisWithoutProof(error, proofOfAddressDocument)) throw error;
+
+          log("Proof-of-address PDF could not be analyzed inline. Retrying without OCR extraction for that file.");
+          setProcessingMessage("Proof-of-address PDF uploaded. Retrying verification without inline OCR extraction...");
+          latestDocumentAnalysis = await analyzeManualReviewDocuments(authToken, {
+            ...analysisInput,
+            proofOfAddressDocument: null,
+          });
+        }
+        setDocumentAnalysis(latestDocumentAnalysis);
+        setProcessingMessage("Document analysis complete. Writing the order to Supabase...");
+      }
+
+      await completeApprovedPurchase(latestDocumentAnalysis);
       setKycReadyToConfirm(false);
       setProcessingMessage("");
       setStep(4);
@@ -1123,6 +1207,7 @@ export default function PondoCheckoutPage() {
     hasIdentityDocument: Boolean(identityDocument),
     hasProofOfAddress: Boolean(proofOfAddressDocument),
     identityDocumentType,
+    documentAnalysis,
   });
 
   return (
@@ -1550,8 +1635,9 @@ export default function PondoCheckoutPage() {
                               <input
                                 type="file"
                                 accept=".pdf,.jpg,.jpeg,.png"
-                                onChange={(event) => {
-                                  setIdentityDocument(rememberSelectedDocument(event.target.files?.[0] || null));
+                                onChange={async (event) => {
+                                  setIdentityDocument(await rememberSelectedDocument(event.target.files?.[0] || null));
+                                  setDocumentAnalysis(null);
                                 }}
                                 className="block w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-pondo-orange-500 file:px-3 file:py-2 file:font-bold file:text-white"
                               />
@@ -1578,8 +1664,9 @@ export default function PondoCheckoutPage() {
                               <input
                                 type="file"
                                 accept=".pdf,.jpg,.jpeg,.png"
-                                onChange={(event) => {
-                                  setProofOfAddressDocument(rememberSelectedDocument(event.target.files?.[0] || null));
+                                onChange={async (event) => {
+                                  setProofOfAddressDocument(await rememberSelectedDocument(event.target.files?.[0] || null));
+                                  setDocumentAnalysis(null);
                                 }}
                                 className="block w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-sky-600 file:px-3 file:py-2 file:font-bold file:text-white"
                               />
@@ -1814,6 +1901,64 @@ export default function PondoCheckoutPage() {
                 ))}
               </div>
             </div>
+
+            {documentAnalysis ? (
+              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                  <div className="text-sm font-bold text-pondo-navy-900">Identity extraction</div>
+                  <div className="mt-3 space-y-2 text-sm text-slate-700">
+                    {[
+                      ["ID number", documentAnalysis.identity.extracted.idNumber || "Not extracted"],
+                      ["Full name", documentAnalysis.identity.extracted.fullName || "Not extracted"],
+                      ["Date of birth", documentAnalysis.identity.extracted.birthDate || "Not extracted"],
+                      ["Gender", documentAnalysis.identity.extracted.gender || "Not extracted"],
+                      ["Citizenship", documentAnalysis.identity.extracted.citizenship || "Not extracted"],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                        <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">{label}</div>
+                        <div className="mt-1 text-sm text-slate-800">{value}</div>
+                      </div>
+                    ))}
+                    <div className="text-xs text-slate-500">Source: {documentAnalysis.identity.source}</div>
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                  <div className="text-sm font-bold text-pondo-navy-900">Address extraction</div>
+                  <div className="mt-3 space-y-2 text-sm text-slate-700">
+                    {[
+                      ["Account holder", documentAnalysis.proofOfAddress?.extracted.accountHolderName || "Not extracted"],
+                      ["Address line 1", documentAnalysis.proofOfAddress?.extracted.addressLine1 || "Not extracted"],
+                      ["Suburb", documentAnalysis.proofOfAddress?.extracted.suburb || "Not extracted"],
+                      ["Municipality / area", documentAnalysis.proofOfAddress?.extracted.municipality || "Not extracted"],
+                      ["Postal code", documentAnalysis.proofOfAddress?.extracted.postalCode || "Not extracted"],
+                      [
+                        "Full extracted address",
+                        [
+                          documentAnalysis.proofOfAddress?.extracted.addressLine1,
+                          documentAnalysis.proofOfAddress?.extracted.suburb,
+                          documentAnalysis.proofOfAddress?.extracted.municipality,
+                          documentAnalysis.proofOfAddress?.extracted.postalCode,
+                        ].filter(Boolean).join(", ") || "Not extracted",
+                      ],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                        <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">{label}</div>
+                        <div className="mt-1 text-sm text-slate-800">{value}</div>
+                      </div>
+                    ))}
+                    <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                      <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">SAPS zone check</div>
+                      <div className="mt-1 text-sm text-slate-800">
+                        {documentAnalysis.comparisons.sapsAreaMatch
+                          ? `${documentAnalysis.comparisons.sapsAreaMatch} (${documentAnalysis.comparisons.sapsRiskTier})`
+                          : "No direct match"}
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">Source: {documentAnalysis.proofOfAddress?.source || "unavailable"}</div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             <div className="mt-5 flex flex-wrap gap-3">
               <button

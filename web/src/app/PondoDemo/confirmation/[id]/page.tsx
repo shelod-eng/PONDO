@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { QRCodeCanvas } from "qrcode.react";
 import { PondoDemoNav } from "@/components/PondoDemoNav";
 import { useAuth } from "@/lib/auth";
-import { getDemoOrder, login, resolveManualReviewOrder, type DemoOrderDetail } from "@/lib/api";
+import { getDemoOrder, login, resolveManualReviewOrder, type DemoOrderDetail, type DocumentAnalysisResult } from "@/lib/api";
 
 function money(cents: number) {
   return new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }).format(cents / 100);
@@ -37,22 +37,35 @@ function manualReviewState(reviewStatus: string | null | undefined, riskDecision
   };
 }
 
-function buildReviewAssistantSummary(reviewStatus: string | null | undefined, riskDecision: string | null | undefined) {
+function getDocumentAnalysis(data: DemoOrderDetail | null): DocumentAnalysisResult | null {
+  const details = data?.details as { riskAssessment?: { payload?: { documentContext?: { documentAnalysis?: DocumentAnalysisResult | null } } } } | undefined;
+  return details?.riskAssessment?.payload?.documentContext?.documentAnalysis || null;
+}
+
+function buildReviewAssistantSummary(
+  reviewStatus: string | null | undefined,
+  riskDecision: string | null | undefined,
+  documentAnalysis: DocumentAnalysisResult | null,
+) {
   const recommendation =
     reviewStatus === "approved"
       ? "approved"
       : reviewStatus === "declined"
         ? "declined"
+        : documentAnalysis?.recommendation.decision === "decline"
+          ? "decline"
+          : documentAnalysis?.recommendation.decision === "approve"
+            ? "approve"
         : riskDecision === "manual_review_hold"
           ? "approve"
           : "approve";
 
   return {
-    summary:
-      recommendation === "declined"
+    summary: documentAnalysis?.recommendation.summary ||
+      (recommendation === "declined"
         ? "AI review assistant recommends decline because the review outcome remains unresolved against the current verification state."
-        : "AI review assistant recommends approval because the supporting documents have been submitted and the case is ready for fulfilment release in this demo flow.",
-    reasons: [
+        : "AI review assistant recommends approval because the supporting documents have been submitted and the case is ready for fulfilment release in this demo flow."),
+    reasons: documentAnalysis?.recommendation.reasons || [
       "Supporting documents submitted",
       "Manual-review case awaiting analyst decision",
       "Back-office approval is required before fulfilment release",
@@ -105,7 +118,8 @@ export default function ConfirmationPage() {
   const tx = data?.transaction;
   const underManualReview = tx?.risk_decision === "manual_review_hold";
   const reviewState = manualReviewState(tx?.review_status, tx?.risk_decision);
-  const reviewAssistant = buildReviewAssistantSummary(tx?.review_status, tx?.risk_decision);
+  const documentAnalysis = getDocumentAnalysis(data);
+  const reviewAssistant = buildReviewAssistantSummary(tx?.review_status, tx?.risk_decision, documentAnalysis);
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#e9f1ff_0%,#f7faff_34%,#edf4ff_100%)] text-pondo-navy-900">
@@ -208,6 +222,61 @@ export default function ConfirmationPage() {
                 ))}
               </div>
             </div>
+
+            {documentAnalysis ? (
+              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                  <div className="text-sm font-bold text-pondo-navy-900">Identity extraction</div>
+                  <div className="mt-3 space-y-2 text-sm text-slate-700">
+                    {[
+                      ["ID number", documentAnalysis.identity.extracted.idNumber || "Not extracted"],
+                      ["Full name", documentAnalysis.identity.extracted.fullName || "Not extracted"],
+                      ["Date of birth", documentAnalysis.identity.extracted.birthDate || "Not extracted"],
+                      ["Gender", documentAnalysis.identity.extracted.gender || "Not extracted"],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                        <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">{label}</div>
+                        <div className="mt-1 text-sm text-slate-800">{value}</div>
+                      </div>
+                    ))}
+                    <div className="text-xs text-slate-500">Source: {documentAnalysis.identity.source}</div>
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                  <div className="text-sm font-bold text-pondo-navy-900">Address extraction</div>
+                  <div className="mt-3 space-y-2 text-sm text-slate-700">
+                    {[
+                      ["Account holder", documentAnalysis.proofOfAddress?.extracted.accountHolderName || "Not extracted"],
+                      ["Address line 1", documentAnalysis.proofOfAddress?.extracted.addressLine1 || "Not extracted"],
+                      ["Suburb", documentAnalysis.proofOfAddress?.extracted.suburb || "Not extracted"],
+                      ["Municipality / area", documentAnalysis.proofOfAddress?.extracted.municipality || "Not extracted"],
+                      ["Postal code", documentAnalysis.proofOfAddress?.extracted.postalCode || "Not extracted"],
+                      [
+                        "Full extracted address",
+                        [
+                          documentAnalysis.proofOfAddress?.extracted.addressLine1,
+                          documentAnalysis.proofOfAddress?.extracted.suburb,
+                          documentAnalysis.proofOfAddress?.extracted.municipality,
+                          documentAnalysis.proofOfAddress?.extracted.postalCode,
+                        ].filter(Boolean).join(", ") || "Not extracted",
+                      ],
+                      [
+                        "SAPS zone check",
+                        documentAnalysis.comparisons.sapsAreaMatch
+                          ? `${documentAnalysis.comparisons.sapsAreaMatch} (${documentAnalysis.comparisons.sapsRiskTier})`
+                          : "No direct match",
+                      ],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                        <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">{label}</div>
+                        <div className="mt-1 text-sm text-slate-800">{value}</div>
+                      </div>
+                    ))}
+                    <div className="text-xs text-slate-500">Source: {documentAnalysis.proofOfAddress?.source || "unavailable"}</div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             <div className="mt-5 flex flex-wrap gap-3">
               <button

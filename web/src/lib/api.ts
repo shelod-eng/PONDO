@@ -61,6 +61,7 @@ export type OrderRiskContext = {
     proofOfAddressRequired?: boolean;
     proofOfAddressUploaded?: boolean;
     proofOfAddressFileName?: string;
+    documentAnalysis?: DocumentAnalysisResult | null;
   };
   clientGeo?: {
     ip?: string;
@@ -84,6 +85,58 @@ export type OrderRiskContext = {
 };
 
 export type DemoOrderDetail = { transaction: Transaction; details: unknown; audit: AuditEntry[] };
+export type DocumentUploadPayload = {
+  fileName: string;
+  mimeType: string;
+  base64Data: string;
+};
+
+export type DocumentAnalysisResult = {
+  identity: {
+    documentType: "sa_id" | "drivers_licence";
+    source: "pdf_text" | "derived_from_form" | "demo_filename" | "unavailable";
+    extracted: {
+      idNumber: string | null;
+      fullName: string | null;
+      firstName: string | null;
+      surname: string | null;
+      birthDate: string | null;
+      gender: string | null;
+      citizenship: string | null;
+      licenseNumber: string | null;
+    };
+    issues: string[];
+  };
+  proofOfAddress: {
+    source: "pdf_text" | "derived_from_form" | "demo_filename" | "unavailable";
+    extracted: {
+      accountHolderName: string | null;
+      addressLine1: string | null;
+      suburb: string | null;
+      municipality: string | null;
+      postalCode: string | null;
+      provider: string | null;
+    };
+    issues: string[];
+  } | null;
+  comparisons: {
+    idMatchesEnteredId: boolean | null;
+    nameMatchesOrderName: boolean | null;
+    addressMatchesDeliveryAddress: boolean | null;
+    postalCodeMatches: boolean | null;
+    geoMatchesProvince: boolean | null;
+    sapsAreaMatch: string | null;
+    sapsRiskTier: string | null;
+    sapsSeverityIndex: number | null;
+    riskFlags: string[];
+  };
+  recommendation: {
+    decision: "approve" | "manual_review" | "decline";
+    score: number;
+    summary: string;
+    reasons: string[];
+  };
+};
 export type RiskAssessment = {
   score: number;
   decision: "auto_approve" | "elevated_verification" | "manual_review_hold";
@@ -227,10 +280,32 @@ const API_BASE_URL = API_BASE_URLS[0];
 function extractErrorMessage(status: number, data: unknown, text: string) {
   let code = "";
   if (data && typeof data === "object") {
-    const maybeError = (data as { error?: unknown; message?: unknown }).error;
-    const maybeMessage = (data as { error?: unknown; message?: unknown }).message;
+    const payload = data as {
+      error?: unknown;
+      message?: unknown;
+      details?: {
+        formErrors?: unknown;
+        fieldErrors?: Record<string, unknown>;
+      };
+    };
+    const maybeError = payload.error;
+    const maybeMessage = payload.message;
     if (typeof maybeError === "string" && maybeError.trim()) code = maybeError.trim();
     if (typeof maybeMessage === "string" && maybeMessage.trim()) return { code, message: maybeMessage.trim() };
+    const formErrors = Array.isArray(payload.details?.formErrors) ? payload.details?.formErrors : [];
+    const firstFormError = formErrors.find((item) => typeof item === "string" && item.trim());
+    if (typeof firstFormError === "string") return { code, message: firstFormError.trim() };
+
+    const fieldErrors = payload.details?.fieldErrors;
+    if (fieldErrors && typeof fieldErrors === "object") {
+      for (const [field, value] of Object.entries(fieldErrors)) {
+        if (!Array.isArray(value)) continue;
+        const firstFieldError = value.find((item) => typeof item === "string" && item.trim());
+        if (typeof firstFieldError === "string") {
+          return { code, message: `${field}: ${firstFieldError.trim()}` };
+        }
+      }
+    }
     if (code) return { code, message: code };
   }
   if (text.trim()) return { code, message: text.trim() };
@@ -454,6 +529,35 @@ export async function resolveManualReviewOrder(token: string, id: string, decisi
   });
 }
 
+export async function analyzeManualReviewDocuments(
+  token: string,
+  input: {
+    identityDocumentType: "sa_id" | "drivers_licence";
+    fullName: string;
+    enteredIdNumber: string;
+    deliveryAddress: {
+      address1: string;
+      city: string;
+      province: string;
+      postalCode: string;
+    };
+    clientGeo?: {
+      city?: string;
+      province?: string;
+      country?: string;
+    };
+    orderValueCents: number;
+    identityDocument: DocumentUploadPayload;
+    proofOfAddressDocument?: DocumentUploadPayload | null;
+  },
+) {
+  return apiFetch<DocumentAnalysisResult>("/api/pondo/documents/analyze", {
+    method: "POST",
+    token,
+    body: JSON.stringify(input),
+  });
+}
+
 export async function getDemoOrderProcess(token: string, id: string) {
   return apiFetch<DeliveryProcess>(`/api/pondo/orders/${id}/process`, { token });
 }
@@ -561,6 +665,7 @@ export async function persistPondoRiskAssessment(
       proofOfAddressRequired?: boolean;
       proofOfAddressUploaded?: boolean;
       proofOfAddressFileName?: string;
+      documentAnalysis?: DocumentAnalysisResult | null;
     };
     projectedScore?: number;
     projectedDecision?: "auto_approve" | "elevated_verification" | "manual_review_hold";
