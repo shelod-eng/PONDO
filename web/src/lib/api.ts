@@ -1,4 +1,5 @@
 import type { PaymentMethod } from "./paymentMethods";
+import type { AdminDashboardData } from "@/types/admin";
 
 export type Role = "customer" | "sponsor";
 
@@ -14,6 +15,7 @@ export type Transaction = {
   risk_score?: number | null;
   risk_decision?: string | null;
   risk_level?: string | null;
+  review_status?: string | null;
   qr_payload: string;
   status: string;
   qr_scanned_at: string | null;
@@ -52,6 +54,14 @@ export type DeliveryDetails = {
 export type OrderRiskContext = {
   idNumber?: string;
   deviceFingerprint?: string;
+  documentContext?: {
+    identityDocumentType?: "sa_id" | "drivers_licence";
+    identityDocumentUploaded?: boolean;
+    identityDocumentFileName?: string;
+    proofOfAddressRequired?: boolean;
+    proofOfAddressUploaded?: boolean;
+    proofOfAddressFileName?: string;
+  };
   clientGeo?: {
     ip?: string;
     city?: string;
@@ -245,6 +255,24 @@ function normalizeFetchFailure(error: unknown) {
   return new Error("The service is temporarily unavailable. Please try again in a moment.");
 }
 
+function shouldFallbackToNextBase(error: unknown) {
+  if (!(error instanceof Error)) return false;
+
+  const status = typeof (error as { status?: unknown }).status === "number"
+    ? ((error as { status?: number }).status ?? 0)
+    : 0;
+  const code = typeof (error as { code?: unknown }).code === "string"
+    ? ((error as { code?: string }).code ?? "")
+    : "";
+
+  // Only fall back when the endpoint truly looks unavailable on this base.
+  if (status === 404 || status === 405) {
+    return !code || code === "api_endpoint_unavailable" || code === "request_failed_404" || code === "request_failed_405";
+  }
+
+  return status === 502 || status === 503 || status === 504;
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit & { token?: string }) {
   const headers = new Headers(init?.headers);
   headers.set("content-type", "application/json");
@@ -290,8 +318,9 @@ async function apiFetch<T>(path: string, init?: RequestInit & { token?: string }
 
       throw Object.assign(new Error(message), { status: res.status, data, baseUrl, path, code: code || message });
     } catch (error) {
-      lastError = normalizeFetchFailure(error);
-      if (hasNext) continue;
+      const normalized = normalizeFetchFailure(error);
+      lastError = normalized;
+      if (hasNext && shouldFallbackToNextBase(error)) continue;
       throw lastError;
     }
   }
@@ -417,6 +446,14 @@ export async function getDemoOrder(token: string, id: string) {
   return apiFetch<DemoOrderDetail>(`/api/pondo/orders/${id}`, { token });
 }
 
+export async function resolveManualReviewOrder(token: string, id: string, decision: "approved" | "declined") {
+  return apiFetch<{ transaction: Transaction }>(`/api/pondo/orders/${encodeURIComponent(id)}/manual-review`, {
+    method: "POST",
+    token,
+    body: JSON.stringify({ decision }),
+  });
+}
+
 export async function getDemoOrderProcess(token: string, id: string) {
   return apiFetch<DeliveryProcess>(`/api/pondo/orders/${id}/process`, { token });
 }
@@ -427,6 +464,10 @@ export async function sponsorDemoSummary(token: string) {
 
 export async function sponsorDemoOrders(token: string) {
   return apiFetch<{ items: Array<Transaction & { live?: boolean; details?: unknown }> }>("/api/pondo/sponsor/orders", { token });
+}
+
+export async function fetchAdminDashboard() {
+  return apiFetch<AdminDashboardData>("/api/pondo/admin/dashboard");
 }
 
 export async function topUpWallet(
@@ -510,9 +551,17 @@ export async function persistPondoRiskAssessment(
     transunionScore: number | null;
     transunionApproved: boolean;
     kycIdentityVerified: boolean;
-    experianIncome: number;
+    experianIncome?: number | null;
     fraudScore: number;
     approved: boolean;
+    documentContext?: {
+      identityDocumentType?: "sa_id" | "drivers_licence";
+      identityDocumentUploaded?: boolean;
+      identityDocumentFileName?: string;
+      proofOfAddressRequired?: boolean;
+      proofOfAddressUploaded?: boolean;
+      proofOfAddressFileName?: string;
+    };
     projectedScore?: number;
     projectedDecision?: "auto_approve" | "elevated_verification" | "manual_review_hold";
     projectedFactors?: string[];

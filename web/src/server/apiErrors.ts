@@ -74,6 +74,15 @@ const ERROR_MAP: Record<string, ApiErrorConfig> = {
     status: 401,
     message: "Please sign in before continuing.",
   },
+  manual_review_not_found: {
+    status: 404,
+    message: "This manual review case could not be found.",
+  },
+  manual_review_resolve_failed: {
+    status: 503,
+    message: "Manual review could not be updated right now. Please try again.",
+    retryable: true,
+  },
   otp_expired: {
     status: 410,
     message: "The OTP code has expired. Please request a new code.",

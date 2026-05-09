@@ -12,6 +12,7 @@ import {
   getPlaceAddress,
   login,
   persistPondoRiskAssessment,
+  resolveManualReviewOrder,
   sendOtp,
   simulateDemoCredit,
   type AddressSuggestion,
@@ -32,7 +33,7 @@ import { fetchGeoLocation, type GeoLocation } from "@/lib/geolocation";
 import { useAuth } from "@/lib/auth";
 import { usePondoCart } from "@/lib/pondoCart";
 import { FALLBACK_IMAGE, FALLBACK_PRODUCTS, IMAGE_BY_PRODUCT } from "@/lib/demoCatalog";
-import { deriveSouthAfricanIdRisk, parseSouthAfricanId, validateSAID } from "@/lib/validateSAID";
+import { deriveSouthAfricanIdRisk, validateSAID } from "@/lib/validateSAID";
 
 const partnerOptions: Array<{ id: PartnerName; label: string }> = [
   { id: "amazon", label: "Amazon" },
@@ -59,10 +60,18 @@ type VetResult = {
   transunionScore: number;
   transunionApproved: boolean;
   kycIdentityVerified: boolean;
-  experianIncome: number;
+  experianIncome: number | null;
   fraudScore: number;
   approved: boolean;
   screeningMode: ScreeningMode;
+};
+
+type IdentityDocumentType = "sa_id" | "drivers_licence";
+
+type SelectedDocument = {
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
 };
 
 const DEMO_CUSTOMER_PROFILES: DemoCustomerProfile[] = [
@@ -216,6 +225,69 @@ function riskDecisionLabel(decision: RiskAssessment["decision"] | ReturnType<typ
   return "Auto-Approve";
 }
 
+function manualReviewDisplayState(reviewStatus: string | null | undefined, riskDecision: string | null | undefined) {
+  if (reviewStatus === "approved") {
+    return {
+      title: "Manual review approved - released to fulfilment",
+      message: "The analyst approved the submitted supporting documents. The order can now move into the normal fulfilment and delivery process.",
+      chip: "Released to fulfilment",
+    };
+  }
+  if (reviewStatus === "declined") {
+    return {
+      title: "Manual review declined",
+      message: "The analyst declined this review after checking the submitted supporting documents. The order will not move forward to fulfilment.",
+      chip: "Review declined",
+    };
+  }
+  if (riskDecision === "manual_review_hold") {
+    return {
+      title: "Supporting documents received - awaiting manual review",
+      message: "The supporting documents were received successfully, but the order remains paused until an analyst completes the manual review.",
+      chip: "Documents received - awaiting review",
+    };
+  }
+  return {
+    title: "Order received, thanks!",
+    message: "The order is ready to continue through the normal fulfilment and delivery process.",
+    chip: "Released to fulfilment",
+  };
+}
+
+function buildReviewAssistantSummary(input: {
+  reviewStatus: string | null | undefined;
+  score: number | null | undefined;
+  decision: string | null | undefined;
+  fullName: string;
+  hasIdentityDocument: boolean;
+  hasProofOfAddress: boolean;
+  identityDocumentType: IdentityDocumentType;
+}) {
+  const reasons = [
+    input.hasIdentityDocument
+      ? `${input.identityDocumentType === "sa_id" ? "South African ID" : "Driver's licence"} uploaded`
+      : "Primary identity document still missing",
+    input.hasProofOfAddress ? "Proof of address uploaded" : "Proof of address still missing",
+    typeof input.score === "number" ? `Composite risk score recorded at ${input.score}` : "Composite risk score pending",
+  ];
+
+  const recommendation =
+    input.reviewStatus === "approved"
+      ? "approved"
+      : input.reviewStatus === "declined"
+        ? "declined"
+        : input.hasIdentityDocument && input.hasProofOfAddress && input.decision === "manual_review_hold"
+          ? "approve"
+          : "decline";
+
+  const summary =
+    recommendation === "approve" || recommendation === "approved"
+      ? `AI review assistant recommends approval for ${input.fullName} because the required supporting documents have been received and the case is ready for fulfilment release.`
+      : `AI review assistant recommends decline or continued hold for ${input.fullName} because the case is incomplete or still presents unresolved review concerns.`;
+
+  return { recommendation, summary, reasons };
+}
+
 function money(cents: number) {
   return new Intl.NumberFormat("en-ZA", {
     style: "currency",
@@ -272,6 +344,53 @@ function formatDeliveryDateLabel(value: string) {
     year: "numeric",
   }).format(parsed);
 }
+
+function monthLabel(value: Date) {
+  return new Intl.DateTimeFormat("en-ZA", {
+    month: "long",
+    year: "numeric",
+  }).format(value);
+}
+
+function dayNameLabels() {
+  const formatter = new Intl.DateTimeFormat("en-ZA", { weekday: "short" });
+  const start = new Date(Date.UTC(2026, 4, 3));
+  return Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(start);
+    day.setUTCDate(start.getUTCDate() + index);
+    return formatter.format(day);
+  });
+}
+
+function buildCalendarMonth(monthStart: Date, minDateValue: string) {
+  const firstDay = new Date(monthStart.getFullYear(), monthStart.getMonth(), 1);
+  const lastDay = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
+  const leadingDays = firstDay.getDay();
+  const cells: Array<{ key: string; date: string | null; label: number | null; disabled: boolean }> = [];
+
+  for (let index = 0; index < leadingDays; index += 1) {
+    cells.push({ key: `empty-${monthStart.toISOString()}-${index}`, date: null, label: null, disabled: true });
+  }
+
+  for (let day = 1; day <= lastDay.getDate(); day += 1) {
+    const current = new Date(monthStart.getFullYear(), monthStart.getMonth(), day);
+    const value = toDateInputValue(current);
+    cells.push({
+      key: value,
+      date: value,
+      label: day,
+      disabled: value < minDateValue,
+    });
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push({ key: `tail-${monthStart.toISOString()}-${cells.length}`, date: null, label: null, disabled: true });
+  }
+
+  return cells;
+}
+
+const CALENDAR_DAY_LABELS = dayNameLabels();
 
 function createAddressSessionToken() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -369,6 +488,11 @@ export default function PondoCheckoutPage() {
   const [catalog, setCatalog] = useState<DemoProduct[]>(FALLBACK_PRODUCTS);
   const [clientGeo, setClientGeo] = useState<GeoLocation | null>(null);
   const [deviceFingerprint, setDeviceFingerprint] = useState("");
+  const [calendarMonthCount] = useState(18);
+  const [identityDocumentType, setIdentityDocumentType] = useState<IdentityDocumentType>("sa_id");
+  const [identityDocument, setIdentityDocument] = useState<SelectedDocument | null>(null);
+  const [proofOfAddressDocument, setProofOfAddressDocument] = useState<SelectedDocument | null>(null);
+  const [reviewAssistantOpen, setReviewAssistantOpen] = useState(false);
   const [, setApiLogs] = useState<string[]>(["Awaiting transaction initiation..."]);
 
   const customer = session?.customer || null;
@@ -378,6 +502,18 @@ export default function PondoCheckoutPage() {
     () => DELIVERY_TIME_SLOTS.find((slot) => slot.id === deliveryWindow) || null,
     [deliveryWindow],
   );
+  const deliveryCalendarMonths = useMemo(() => {
+    const [year, month] = minimumDeliveryDate.split("-").map(Number);
+    const startMonth = new Date(year, (month || 1) - 1, 1);
+    return Array.from({ length: calendarMonthCount }, (_, index) => {
+      const monthStart = new Date(startMonth.getFullYear(), startMonth.getMonth() + index, 1);
+      return {
+        key: `${monthStart.getFullYear()}-${monthStart.getMonth() + 1}`,
+        label: monthLabel(monthStart),
+        cells: buildCalendarMonth(monthStart, minimumDeliveryDate),
+      };
+    });
+  }, [calendarMonthCount, minimumDeliveryDate]);
   const selectedProfile = useMemo(
     () => DEMO_CUSTOMER_PROFILES.find((profile) => profile.email === email) || DEMO_CUSTOMER_PROFILES[0],
     [email],
@@ -497,7 +633,6 @@ export default function PondoCheckoutPage() {
     [cartLines],
   );
   const normalizedIdNumber = capturedIdNumber.replace(/\D/g, "");
-  const saidDetails = useMemo(() => parseSouthAfricanId(normalizedIdNumber), [normalizedIdNumber]);
   const saidRisk = useMemo(() => deriveSouthAfricanIdRisk(normalizedIdNumber), [normalizedIdNumber]);
   const projectedRisk = useMemo(
     () =>
@@ -513,6 +648,8 @@ export default function PondoCheckoutPage() {
   );
   const requiresEnhancedRiskChecks = projectedRisk.decision !== "auto_approve";
   const requiresKycPipelineView = projectedRisk.decision !== "auto_approve";
+  const requiresManualReviewDocuments = projectedRisk.decision === "manual_review_hold";
+  const requiresProofOfAddress = requiresManualReviewDocuments;
   const isSaidComplete = normalizedIdNumber.length === 13;
   const isSaidValid = isSaidComplete && validateSAID(normalizedIdNumber);
   const isUnderAge = Boolean(saidRisk?.rejected);
@@ -523,6 +660,15 @@ export default function PondoCheckoutPage() {
 
   function log(message: string) {
     setApiLogs((prev) => [`${ts()} ${message}`, ...prev].slice(0, 40));
+  }
+
+  function rememberSelectedDocument(file: File | null) {
+    if (!file) return null;
+    return {
+      fileName: file.name,
+      fileSize: file.size,
+      mimeType: file.type || "application/octet-stream",
+    };
   }
 
   async function ensureCustomerAuth(forceRefresh = false, preferredUsername?: string) {
@@ -558,6 +704,9 @@ export default function PondoCheckoutPage() {
       setKycReadyToConfirm(false);
       setDeliveryDate("");
       setDeliveryWindow("");
+      setIdentityDocumentType("sa_id");
+      setIdentityDocument(null);
+      setProofOfAddressDocument(null);
       setProcessingMessage("");
       setStep(2);
       log(`Partner profile fetched: ${out.session.product.name} @ ${money(out.session.product.priceCents)}`);
@@ -730,7 +879,7 @@ export default function PondoCheckoutPage() {
         transunionScore: 0,
         transunionApproved: true,
         kycIdentityVerified: true,
-        experianIncome: customer.monthlyIncome,
+        experianIncome: null,
         fraudScore: 0.01,
         approved: true,
         screeningMode: "skip",
@@ -744,16 +893,15 @@ export default function PondoCheckoutPage() {
     const transunionScore = data.result.score as number;
     const transunionApproved = Boolean(data.result.approved);
     const kycIdentityVerified = true;
-    const experianIncome = customer.monthlyIncome;
     const geoPenalty = capturedProvince.toLowerCase().includes("kwa") ? 0.02 : 0.01;
     const fraudScore = Math.max(0.01, Number(((850 - transunionScore) / 10000 + geoPenalty).toFixed(2)));
-    const approved = transunionApproved && kycIdentityVerified && experianIncome >= 15000 && fraudScore <= 0.08;
+    const approved = transunionApproved && kycIdentityVerified && fraudScore <= 0.08;
 
     const result: VetResult = {
       transunionScore,
       transunionApproved,
       kycIdentityVerified,
-      experianIncome,
+      experianIncome: null,
       fraudScore,
       approved,
       screeningMode: "full",
@@ -761,7 +909,6 @@ export default function PondoCheckoutPage() {
 
     setVetResult(result);
     log(`TransUnion ITC score: ${transunionScore} (${transunionApproved ? "approved" : "declined"})`);
-    log(`Experian affordability: income ${new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR", maximumFractionDigits: 0 }).format(experianIncome)}/mo`);
     log(`Geo-location reviewed: ${capturedCity}, ${capturedProvince}`);
     if (saidRisk) {
       log(`SA ID derived age ${saidRisk.age} (+${saidRisk.ageScore}) and sex ${saidRisk.gender} (+${saidRisk.genderScore}).`);
@@ -813,6 +960,14 @@ export default function PondoCheckoutPage() {
             latitude: addressValidation?.latitude ?? null,
             longitude: addressValidation?.longitude ?? null,
           },
+          documentContext: {
+            identityDocumentType,
+            identityDocumentUploaded: Boolean(identityDocument),
+            identityDocumentFileName: identityDocument?.fileName,
+            proofOfAddressRequired: requiresProofOfAddress,
+            proofOfAddressUploaded: Boolean(proofOfAddressDocument),
+            proofOfAddressFileName: proofOfAddressDocument?.fileName,
+          },
           otpVerified: true,
           saidVerified: isSaidValid,
         },
@@ -858,7 +1013,7 @@ export default function PondoCheckoutPage() {
 
       setProcessingMessage(
         requiresEnhancedRiskChecks
-          ? "Running composite risk checks using SA ID age, sex, KYC, affordability, fraud, and geolocation..."
+          ? "Running composite risk checks using SA ID, KYC, ITC, fraud, and geolocation..."
           : "SA ID and geo-risk checks are within the auto-approve band. Finalizing order confirmation...",
       );
 
@@ -879,6 +1034,14 @@ export default function PondoCheckoutPage() {
         experianIncome: result.experianIncome,
         fraudScore: result.fraudScore,
         approved: projectedRisk.decision === "auto_approve",
+        documentContext: {
+          identityDocumentType,
+          identityDocumentUploaded: Boolean(identityDocument),
+          identityDocumentFileName: identityDocument?.fileName,
+          proofOfAddressRequired: requiresProofOfAddress,
+          proofOfAddressUploaded: Boolean(proofOfAddressDocument),
+          proofOfAddressFileName: proofOfAddressDocument?.fileName,
+        },
         projectedScore: projectedRisk.score,
         projectedDecision: projectedRisk.decision,
         projectedFactors: projectedRisk.geoFactors,
@@ -909,6 +1072,14 @@ export default function PondoCheckoutPage() {
 
   async function onConfirmVerifiedOrder() {
     setError("");
+    if (requiresManualReviewDocuments && !identityDocument) {
+      setError(`Please upload the customer's ${identityDocumentType === "sa_id" ? "South African ID document" : "driver's licence"} before placing the order into manual review.`);
+      return;
+    }
+    if (requiresProofOfAddress && !proofOfAddressDocument) {
+      setError("Please upload proof of address before placing the order into manual review.");
+      return;
+    }
     setBusy(true);
     setProcessingMessage("All checks passed. Writing the order to Supabase...");
     try {
@@ -924,7 +1095,35 @@ export default function PondoCheckoutPage() {
     }
   }
 
+  async function onResolveManualReview(decision: "approved" | "declined") {
+    if (!completedOrderId) return;
+    setError("");
+    setBusy(true);
+    setProcessingMessage(decision === "approved" ? "Analyst review approved. Releasing order to fulfilment..." : "Analyst review declined. Updating the order status...");
+    try {
+      const authToken = await ensureCustomerAuth(true, capturedEmail || customer?.email);
+      const out = await resolveManualReviewOrder(authToken, completedOrderId, decision);
+      setCompletedTransaction(out.transaction);
+      setProcessingMessage("");
+    } catch (e) {
+      setProcessingMessage("");
+      setError(e instanceof Error ? e.message : "manual_review_resolve_failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const step3Label = completedOrderId ? "Completed" : requiresKycPipelineView ? "KYC Verification" : "OTP Verification";
+  const completedReviewState = manualReviewDisplayState(completedTransaction?.review_status, completedRiskAssessment?.decision);
+  const reviewAssistant = buildReviewAssistantSummary({
+    reviewStatus: completedTransaction?.review_status,
+    score: completedRiskAssessment?.score,
+    decision: completedRiskAssessment?.decision,
+    fullName: capturedFullName,
+    hasIdentityDocument: Boolean(identityDocument),
+    hasProofOfAddress: Boolean(proofOfAddressDocument),
+    identityDocumentType,
+  });
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#e9f1ff_0%,#f7faff_34%,#edf4ff_100%)] text-pondo-navy-900">
@@ -1026,26 +1225,13 @@ export default function PondoCheckoutPage() {
                         "w-full rounded-lg border px-3 py-2 text-slate-800",
                         showSaidFeedback
                           ? isSaidValid
-                            ? "border-emerald-500 bg-emerald-50/40"
+                            ? "border-pondo-line"
                             : "border-red-400 bg-red-50/40"
                           : "border-pondo-line",
                       ].join(" ")}
                     />
-                    {showSaidFeedback ? (
-                      isSaidValid ? (
-                        <div className="mt-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                          <div className="font-semibold">Home Affairs format validated.</div>
-                          {saidDetails ? (
-                            <div className="mt-1">
-                              DOB: {saidDetails.birthDate} | Age: {saidDetails.age} | Sex: {saidDetails.gender === "male" ? "Male" : "Female"}
-                              {saidRisk ? ` | ID risk: +${saidRisk.totalScore}` : ""}
-                            </div>
-                          ) : null}
-                          {isUnderAge ? <div className="mt-1 font-semibold text-red-700">Customer is under 18 and must be rejected.</div> : null}
-                        </div>
-                      ) : (
-                        <p className="mt-1 text-xs font-semibold text-red-600">Enter a valid 13-digit South African ID number.</p>
-                      )
+                    {showSaidFeedback && !isSaidValid ? (
+                      <p className="mt-1 text-xs font-semibold text-red-600">Enter a valid 13-digit South African ID number.</p>
                     ) : null}
                   </div>
                   <div>
@@ -1137,14 +1323,50 @@ export default function PondoCheckoutPage() {
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-bold text-slate-600">Delivery Date</label>
-                    <input
-                      type="date"
-                      min={minimumDeliveryDate}
-                      value={deliveryDate}
-                      onChange={(e) => setDeliveryDate(e.target.value)}
-                      className="w-full rounded-lg border border-pondo-line px-3 py-2 text-slate-800"
-                    />
-                    <p className="mt-1 text-xs text-slate-500">Choose a delivery date from tomorrow onward for managed fulfilment.</p>
+                    <div className="rounded-xl border border-pondo-line bg-white">
+                      <div className="border-b border-slate-200 px-3 py-2 text-sm font-semibold text-pondo-navy-900">
+                        {deliveryDate ? `Selected: ${formatDeliveryDateLabel(deliveryDate)}` : "Choose a delivery date from tomorrow onward"}
+                      </div>
+                      <div className="max-h-80 space-y-4 overflow-y-auto px-3 py-3">
+                        {deliveryCalendarMonths.map((month) => (
+                          <div key={month.key}>
+                            <div className="mb-2 text-xs font-bold uppercase tracking-[0.08em] text-slate-500">{month.label}</div>
+                            <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-slate-400">
+                              {CALENDAR_DAY_LABELS.map((label) => (
+                                <div key={`${month.key}-${label}`} className="py-1">
+                                  {label}
+                                </div>
+                              ))}
+                            </div>
+                            <div className="grid grid-cols-7 gap-1">
+                              {month.cells.map((cell) => (
+                                cell.date ? (
+                                  <button
+                                    key={cell.key}
+                                    type="button"
+                                    disabled={cell.disabled}
+                                    onClick={() => setDeliveryDate(cell.date || "")}
+                                    className={[
+                                      "h-9 rounded-lg text-sm font-semibold transition",
+                                      deliveryDate === cell.date
+                                        ? "bg-pondo-orange-500 text-white"
+                                        : cell.disabled
+                                          ? "cursor-not-allowed bg-slate-100 text-slate-300"
+                                          : "bg-slate-50 text-pondo-navy-900 hover:bg-[#eef3ff]",
+                                    ].join(" ")}
+                                  >
+                                    {cell.label}
+                                  </button>
+                                ) : (
+                                  <div key={cell.key} className="h-9 rounded-lg bg-transparent" />
+                                )
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">The calendar is always visible so customers can scroll and choose an available delivery day directly.</p>
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-bold text-slate-600">Delivery Time Slot</label>
@@ -1172,51 +1394,10 @@ export default function PondoCheckoutPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-sm font-bold text-pondo-navy-900">Composite Risk Preview</div>
-                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                    <div className="rounded-lg border border-white bg-white px-3 py-3 text-sm text-slate-700">
-                      <div className="font-semibold text-pondo-navy-900">South African ID Inputs</div>
-                      {saidRisk ? (
-                        <div className="mt-2 space-y-1 text-xs">
-                          <div>DOB: {saidRisk.birthDate}</div>
-                          <div>Age: {saidRisk.age} {"=>"} +{saidRisk.ageScore}</div>
-                          <div>Sex: {saidRisk.gender === "male" ? "Male" : "Female"} {"=>"} +{saidRisk.genderScore}</div>
-                          <div>Home Affairs validation: {isSaidValid ? "passed" : "pending"}</div>
-                        </div>
-                      ) : (
-                        <div className="mt-2 text-xs text-slate-500">Enter a valid South African ID number to derive age and sex scoring.</div>
-                      )}
-                    </div>
-                    <div className="rounded-lg border border-white bg-white px-3 py-3 text-sm text-slate-700">
-                      <div className="font-semibold text-pondo-navy-900">Geo-Risk Inputs</div>
-                      <div className="mt-2 space-y-1 text-xs">
-                        <div>IP mismatch: {projectedRisk.ipMismatch ? "+40" : "+0"}</div>
-                        <div>High-risk zone: {projectedRisk.highRiskZone ? "+30" : "+0"}</div>
-                        <div>High order value: {projectedRisk.highValue ? "+20" : "+0"}</div>
-                        <div>Device fingerprint: {deviceFingerprint ? "+0" : "+10"}</div>
-                        <div>External IP country uplift: {projectedRisk.nonSouthAfricanIp ? "+25" : "+0"}</div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
-                    <div className="font-semibold">Projected total: {projectedRisk.score} points - {riskDecisionLabel(projectedRisk.decision)}</div>
-                    <div className="mt-1">
-                      {isUnderAge
-                        ? "Customer is under 18 and the order must be rejected."
-                        : projectedRisk.decision === "manual_review_hold"
-                          ? "This checkout will move into manual review hold after verification checks."
-                          : projectedRisk.decision === "elevated_verification"
-                            ? "This checkout will follow the elevated verification pipeline."
-                            : "This checkout remains in the auto-approve band."}
-                    </div>
-                  </div>
-                </div>
-
                 <div className="rounded-xl border border-pondo-line bg-pondo-surface-soft p-3">
                   <div className="mb-2 text-sm font-bold text-pondo-navy-800">Terms & Conditions - POPIA Compliant</div>
                   <div className="max-h-28 overflow-y-auto rounded bg-white p-2 text-xs text-slate-600">
-                    By proceeding, you consent to PONDO collecting and processing your personal information (name, SA ID, contact details, geo-location, financial data) for KYC verification, ITC credit checks, affordability assessment, and fraud detection in accordance with POPIA and internal risk controls.
+                    By proceeding, you consent to PONDO collecting and processing your personal information (name, SA ID, contact details, geo-location, and delivery information) for KYC verification, ITC credit checks, manual review where required, and fraud detection in accordance with POPIA and internal risk controls.
                   </div>
                   <label className="mt-3 flex items-center gap-2 text-sm">
                     <input type="checkbox" checked={termsAccepted} onChange={(e) => setTermsAccepted(e.target.checked)} />
@@ -1304,10 +1485,24 @@ export default function PondoCheckoutPage() {
                     <div className="mt-5 space-y-3">
                       {[
                         { title: "OTP Verification", detail: "SMS one-time pin sent to registered number", state: "Passed" },
-                        { title: "ID / Document Scan", detail: "South African ID validation and identity confirmation", state: isSaidValid ? "Passed" : "Pending" },
+                        {
+                          title: "ID / Document Scan",
+                          detail: requiresManualReviewDocuments
+                            ? identityDocumentType === "sa_id"
+                              ? "South African ID validation and supporting document capture"
+                              : "Driver's licence capture and identity confirmation"
+                            : "South African ID validation and identity confirmation",
+                          state: requiresManualReviewDocuments ? (identityDocument ? "Pending" : "Pending") : (isSaidValid ? "Passed" : "Pending"),
+                        },
                         { title: "ITC Credit Check", detail: "TransUnion / Experian credit bureau inquiry", state: vetResult?.transunionApproved ? "Passed" : "Review" },
-                        { title: "Affordability Assessment", detail: "Income versus order-value ratio analysis", state: vetResult?.experianIncome ? "Passed" : "Review" },
                         { title: "Fraud Screening", detail: "Geo-risk, device, and behaviour checks", state: vetResult?.approved ? "Passed" : "Review" },
+                        {
+                          title: "Manual Review Routing",
+                          detail: projectedRisk.decision === "manual_review_hold"
+                            ? `Customer is flagged for analyst review after checks complete${requiresProofOfAddress ? " with proof-of-address review attached" : ""}`
+                            : "Not required for this checkout",
+                          state: projectedRisk.decision === "manual_review_hold" ? "Pending" : "Skipped",
+                        },
                       ].map((item) => (
                         <div key={item.title} className="flex items-center justify-between rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3">
                           <div className="flex items-center gap-3">
@@ -1322,23 +1517,91 @@ export default function PondoCheckoutPage() {
                       ))}
                     </div>
 
-                    <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                        <div className="font-bold">Geo-risk band</div>
-                        <div className="mt-1">{projectedRisk.score <= 40 ? "0 - 40 auto-approve" : projectedRisk.score <= 70 ? "41 - 70 elevated verification" : "> 70 manual review hold"}</div>
-                        {saidRisk ? <div className="mt-1 text-xs">SA ID adds +{saidRisk.ageScore} for age and +{saidRisk.genderScore} for sex.</div> : null}
+                    {requiresManualReviewDocuments ? (
+                      <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
+                        <div className="text-lg font-extrabold text-pondo-navy-900">Secure Order Verification</div>
+                        <p className="mt-1 text-sm text-slate-700">
+                          For your protection and to ensure secure order processing, this order requires additional verification before approval.
+                          Please upload the requested supporting documents below.
+                        </p>
+
+                        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                          <div className="rounded-xl border border-pondo-line bg-white p-4">
+                            <div className="text-sm font-bold text-pondo-navy-900">Identity document</div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {[
+                                { id: "sa_id" as const, label: "South African ID" },
+                                { id: "drivers_licence" as const, label: "Driver's Licence" },
+                              ].map((option) => (
+                                <button
+                                  key={option.id}
+                                  type="button"
+                                  onClick={() => setIdentityDocumentType(option.id)}
+                                  className={[
+                                    "rounded-full border px-3 py-1.5 text-sm font-semibold transition",
+                                    identityDocumentType === option.id
+                                      ? "border-pondo-orange-500 bg-pondo-orange-500 text-white"
+                                      : "border-pondo-line bg-white text-pondo-navy-900 hover:bg-[#eef3ff]",
+                                  ].join(" ")}
+                                >
+                                  {option.label}
+                                </button>
+                              ))}
+                            </div>
+                            <label className="mt-4 block">
+                              <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-slate-500">Upload identity document</span>
+                              <input
+                                type="file"
+                                accept=".pdf,.jpg,.jpeg,.png"
+                                onChange={(event) => {
+                                  setIdentityDocument(rememberSelectedDocument(event.target.files?.[0] || null));
+                                }}
+                                className="block w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-pondo-orange-500 file:px-3 file:py-2 file:font-bold file:text-white"
+                              />
+                            </label>
+                            <div className="mt-2 text-xs text-slate-500">
+                              {identityDocument
+                                ? `Selected: ${identityDocument.fileName}`
+                                : `Accepted formats: PDF, JPG, PNG. Use the customer's ${identityDocumentType === "sa_id" ? "ID card/book" : "driver's licence"} image or scan.`}
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-pondo-line bg-white p-4">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-sm font-bold text-pondo-navy-900">Proof of address</div>
+                              <div className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-amber-800">
+                                Required
+                              </div>
+                            </div>
+                            <p className="mt-2 text-xs text-slate-600">
+                              Proof of address is now required because this checkout has been routed into manual review.
+                            </p>
+                            <label className="mt-4 block">
+                              <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-slate-500">Upload proof of address</span>
+                              <input
+                                type="file"
+                                accept=".pdf,.jpg,.jpeg,.png"
+                                onChange={(event) => {
+                                  setProofOfAddressDocument(rememberSelectedDocument(event.target.files?.[0] || null));
+                                }}
+                                className="block w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-sky-600 file:px-3 file:py-2 file:font-bold file:text-white"
+                              />
+                            </label>
+                            <div className="mt-2 text-xs text-slate-500">
+                              {proofOfAddressDocument
+                                ? `Selected: ${proofOfAddressDocument.fileName}`
+                                : "Examples: utility bill, bank statement, municipal letter, or lease document."}
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                      <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                        <div className="font-bold">Mismatch handling</div>
-                        <div className="mt-1">{projectedRisk.ipMismatch ? "IP and delivery address do not match. This is normal for work-to-home deliveries and is not fraud by default." : "IP and delivery address align for this checkout."}</div>
-                      </div>
-                    </div>
+                    ) : null}
 
                     <button onClick={onConfirmVerifiedOrder} disabled={busy} className="mt-5 w-full rounded-xl bg-[#1fb782] px-4 py-3 text-lg font-black text-white shadow-[0_10px_20px_rgba(31,183,130,0.28)] hover:bg-[#19a575] disabled:opacity-60">
                       {busy
                         ? "Confirming..."
                         : projectedRisk.decision === "manual_review_hold"
-                          ? "Complete Checks and Place Into Manual Review"
+                          ? "Submit Documents and Queue Manual Review"
                           : "All Checks Passed - Confirm Order"}
                     </button>
                   </div>
@@ -1348,18 +1611,36 @@ export default function PondoCheckoutPage() {
 
             {step === 4 && completedOrderId ? (
               <div className="space-y-4">
-                <div className={completedRiskAssessment?.decision === "manual_review_hold" ? "rounded-2xl border border-red-300 bg-white p-5 shadow-sm" : "rounded-2xl border border-emerald-300 bg-white p-5 shadow-sm"}>
+                <div className={
+                  completedRiskAssessment?.decision === "manual_review_hold"
+                    ? completedTransaction?.review_status === "approved"
+                      ? "rounded-2xl border border-emerald-300 bg-white p-5 shadow-sm"
+                      : completedTransaction?.review_status === "declined"
+                        ? "rounded-2xl border border-red-300 bg-white p-5 shadow-sm"
+                        : "rounded-2xl border border-amber-300 bg-white p-5 shadow-sm"
+                    : "rounded-2xl border border-emerald-300 bg-white p-5 shadow-sm"
+                }>
                   <div className="flex items-start gap-3">
                     <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-2xl font-black text-emerald-700">
                       ?
                     </div>
                     <div>
-                      <h2 className={completedRiskAssessment?.decision === "manual_review_hold" ? "text-2xl font-extrabold text-red-950" : "text-2xl font-extrabold text-emerald-950"}>
-                        {completedRiskAssessment?.decision === "manual_review_hold" ? "Order held for manual review" : "Order received, thanks!"}
+                      <h2 className={
+                        completedRiskAssessment?.decision === "manual_review_hold"
+                          ? completedTransaction?.review_status === "approved"
+                            ? "text-2xl font-extrabold text-emerald-950"
+                            : completedTransaction?.review_status === "declined"
+                              ? "text-2xl font-extrabold text-red-950"
+                              : "text-2xl font-extrabold text-amber-950"
+                          : "text-2xl font-extrabold text-emerald-950"
+                      }>
+                        {completedRiskAssessment?.decision === "manual_review_hold"
+                          ? completedReviewState.title
+                          : "Order received, thanks!"}
                       </h2>
                       <p className="text-sm text-slate-700">
                         {completedRiskAssessment?.decision === "manual_review_hold"
-                          ? `Confirmation has been sent to ${capturedEmail}. The order is paused for manual review before PED collection and fulfilment release.`
+                          ? `Confirmation has been sent to ${capturedEmail}. ${completedReviewState.message}`
                           : `Confirmation has been sent to ${capturedEmail} and SMS confirmation has been sent to ${capturedPhone}. Payment will be collected on delivery using the PED device.`}
                       </p>
                     </div>
@@ -1381,33 +1662,19 @@ export default function PondoCheckoutPage() {
 
                   <div className="mt-5 rounded-xl border border-pondo-line bg-[#f7faff] px-4 py-3 text-sm text-slate-700">
                     {completedRiskAssessment?.decision === "manual_review_hold"
-                      ? "Ops review is now required. Settlement and reconciliation remain blank until manual release and PED payment both complete."
+                      ? completedTransaction?.review_status === "approved"
+                        ? "Manual review is complete and the order has been released to fulfilment. PED payment is still collected later in the normal delivery journey."
+                        : completedTransaction?.review_status === "declined"
+                          ? "Manual review declined this order after document review. Fulfilment and PED payment are both stopped."
+                          : "Supporting documents have been attached to this case. Ops review is now required, and settlement and reconciliation remain blank until manual approval and PED payment both complete."
                       : "Email and SMS notifications include the order summary, delivery address, estimated fulfilment date, and the PONDO verification outcome. Settlement and reconciliation will only update after PED payment is completed at the customer doorstep."}
                   </div>
 
-                  {completedRiskAssessment ? (
-                    <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                        <div className="font-bold text-pondo-navy-900">Composite risk decision</div>
-                        <div className="mt-2 text-lg font-black text-pondo-navy-900">{completedRiskAssessment.score} pts - {completedRiskAssessment.decisionLabel}</div>
-                        <div className="mt-1">{completedRiskAssessment.bandLabel}</div>
-                        <div className="mt-2">{completedRiskAssessment.recommendedPath}</div>
-                        {completedRiskAssessment.identityRisk && completedRiskAssessment.identityRisk.age !== null ? (
-                          <div className="mt-2 text-xs text-slate-600">
-                            SA ID derived DOB {completedRiskAssessment.identityRisk.birthDate} | Age {completedRiskAssessment.identityRisk.age} (+{completedRiskAssessment.identityRisk.ageScore}) | Sex {completedRiskAssessment.identityRisk.gender} (+{completedRiskAssessment.identityRisk.genderScore})
-                          </div>
-                        ) : null}
-                        <div className="mt-2 text-xs uppercase tracking-[0.08em] text-slate-500">Verification: {completedRiskAssessment.verifiedStatus}</div>
-                      </div>
-                      <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                        <div className="font-bold">IP vs Address Review</div>
-                        <div className="mt-2">
-                          {completedRiskAssessment.flags.ipMismatch
-                            ? "Mismatch detected. This is not fraud by default and is treated as a verification signal only."
-                            : "IP region and delivery region align for this checkout."}
-                        </div>
-                        <div className="mt-2 text-xs text-sky-800">{completedRiskAssessment.factors.join(" | ")}</div>
-                      </div>
+                  {completedRiskAssessment?.decision === "manual_review_hold" ? (
+                    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                      <div className="font-bold text-pondo-navy-900">Manual Review Status</div>
+                      <div className="mt-2">{completedReviewState.message}</div>
+                      <div className="mt-2 text-xs uppercase tracking-[0.08em] text-slate-500">Verification: {completedRiskAssessment.verifiedStatus}</div>
                     </div>
                   ) : null}
 
@@ -1418,6 +1685,14 @@ export default function PondoCheckoutPage() {
                     <button onClick={() => router.push("/PondoDemo/shop")} className="rounded-lg border border-pondo-line bg-white px-4 py-2 font-bold text-pondo-navy-900 hover:bg-[#eef3ff]">
                       Continue shopping
                     </button>
+                    {completedRiskAssessment?.decision === "manual_review_hold" && completedTransaction?.review_status !== "approved" && completedTransaction?.review_status !== "declined" ? (
+                      <button
+                        onClick={() => setReviewAssistantOpen(true)}
+                        className="rounded-lg bg-pondo-navy-900 px-4 py-2 font-bold text-white hover:bg-[#243b68]"
+                      >
+                        Open AI Review Assistant Demo
+                      </button>
+                    ) : null}
                   </div>
 
                   <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -1425,8 +1700,12 @@ export default function PondoCheckoutPage() {
                       <>
                         <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">OTP verified</div>
                         <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">ID verified</div>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Credit and affordability checked</div>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">{completedRiskAssessment?.decision === "manual_review_hold" ? "Queued for manual review" : "Released to fulfilment"}</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Credit and fraud checks completed</div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
+                          {completedRiskAssessment?.decision === "manual_review_hold"
+                            ? completedReviewState.chip
+                            : "Released to fulfilment"}
+                        </div>
                       </>
                     ) : (
                       <>
@@ -1479,8 +1758,18 @@ export default function PondoCheckoutPage() {
                     Supabase settlement recorded to {paymentSettlement.bankLabel} using {selectedPaymentMethodMeta.label}.
                   </div>
                 ) : completedRiskAssessment?.decision === "manual_review_hold" ? (
-                  <div className="mt-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
-                    Manual review hold is active. PED collection, settlement, and reconciliation stay blocked until ops release the order.
+                  <div className={`mt-3 rounded-lg px-3 py-2 text-xs ${
+                    completedTransaction?.review_status === "approved"
+                      ? "border border-emerald-300 bg-emerald-50 text-emerald-800"
+                      : completedTransaction?.review_status === "declined"
+                        ? "border border-red-300 bg-red-50 text-red-800"
+                        : "border border-amber-300 bg-amber-50 text-amber-900"
+                  }`}>
+                    {completedTransaction?.review_status === "approved"
+                      ? "Manual review approved. The order is released to fulfilment and awaits the normal PED collection step."
+                      : completedTransaction?.review_status === "declined"
+                        ? "Manual review declined the order after document review. PED collection, settlement, and fulfilment will not proceed."
+                        : "Manual review is pending. Supporting documents were received, but PED collection, settlement, and reconciliation stay blocked until ops release the order."}
                   </div>
                 ) : (
                   <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -1492,6 +1781,68 @@ export default function PondoCheckoutPage() {
           </aside>
         </div>
       </div>
+
+      {reviewAssistantOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4">
+          <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_24px_80px_rgba(15,23,42,0.28)]">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Demo Review Popup</div>
+                <h3 className="mt-2 text-2xl font-extrabold text-pondo-navy-900">AI Review Assistant</h3>
+                <p className="mt-2 text-sm text-slate-600">
+                  This demo pop-screen represents a back-office analyst workflow. The customer would not see this in production.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReviewAssistantOpen(false)}
+                className="rounded-full border border-slate-200 px-3 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-900">
+              <div className="font-bold">Assistant recommendation</div>
+              <div className="mt-2">{reviewAssistant.summary}</div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="text-sm font-bold text-pondo-navy-900">Review signals considered</div>
+              <div className="mt-3 space-y-2 text-sm text-slate-700">
+                {reviewAssistant.reasons.map((reason) => (
+                  <div key={reason} className="rounded-xl bg-white px-3 py-2">
+                    {reason}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button
+                onClick={async () => {
+                  await onResolveManualReview("approved");
+                  setReviewAssistantOpen(false);
+                }}
+                disabled={busy}
+                className="rounded-xl bg-[#1fb782] px-5 py-3 font-bold text-white hover:bg-[#19a575] disabled:opacity-60"
+              >
+                {busy ? "Updating review..." : "Approve And Release To Fulfilment"}
+              </button>
+              <button
+                onClick={async () => {
+                  await onResolveManualReview("declined");
+                  setReviewAssistantOpen(false);
+                }}
+                disabled={busy}
+                className="rounded-xl border border-red-300 bg-white px-5 py-3 font-bold text-red-700 hover:bg-red-50 disabled:opacity-60"
+              >
+                {busy ? "Updating review..." : "Decline Review"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,5 +1,18 @@
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
+import type {
+  AdminDashboardData,
+  CheckoutRecord,
+  CheckoutStatus,
+  KpiMetric,
+  KycPieSlice,
+  KycAuditRecord,
+  KycTrendPoint,
+  PartnerPerformancePoint,
+  RevenueTrendPoint,
+  TxVolumePoint,
+  VerificationState,
+} from "@/types/admin";
 import { getPool } from "./db";
 import { assessGeoRisk, deriveDeliveryLocation, lookupIpGeo, type ClientGeo, type ValidatedAddress } from "./risk";
 
@@ -95,9 +108,17 @@ type RecordRiskAssessmentInput = {
   transunionScore: number | null;
   transunionApproved: boolean;
   kycIdentityVerified: boolean;
-  experianIncome: number;
+  experianIncome?: number | null;
   fraudScore: number;
   approved: boolean;
+  documentContext?: {
+    identityDocumentType?: "sa_id" | "drivers_licence";
+    identityDocumentUploaded?: boolean;
+    identityDocumentFileName?: string;
+    proofOfAddressRequired?: boolean;
+    proofOfAddressUploaded?: boolean;
+    proofOfAddressFileName?: string;
+  };
   projectedScore?: number;
   projectedDecision?: "auto_approve" | "elevated_verification" | "manual_review_hold";
   projectedFactors?: string[];
@@ -271,6 +292,93 @@ function defaultSeed(email: string): PartnerSeed {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function formatTime(iso: string | Date | null, withSeconds = false) {
+  if (!iso) return "-";
+  return new Intl.DateTimeFormat("en-ZA", {
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(withSeconds ? { second: "2-digit" } : {}),
+    hour12: false,
+  }).format(new Date(iso));
+}
+
+function formatRelativeDay(iso: string | null) {
+  if (!iso) return "No recent activity";
+  return new Intl.DateTimeFormat("en-ZA", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(iso));
+}
+
+function formatDayLabel(date: Date) {
+  return new Intl.DateTimeFormat("en-ZA", { weekday: "short" }).format(date);
+}
+
+function formatHourLabel(date: Date) {
+  return new Intl.DateTimeFormat("en-ZA", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+}
+
+function startOfDay(date = new Date()) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function startOfWeek(date = new Date()) {
+  const day = date.getDay();
+  const diff = (day + 6) % 7;
+  const result = new Date(date);
+  result.setHours(0, 0, 0, 0);
+  result.setDate(result.getDate() - diff);
+  return result;
+}
+
+function formatWeekLabel(date: Date) {
+  const month = new Intl.DateTimeFormat("en-ZA", { month: "short" }).format(date);
+  const firstDayOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
+  const weekIndex = Math.floor((date.getDate() + firstDayOfMonth.getDay() - 1) / 7) + 1;
+  return `W${weekIndex} ${month}`;
+}
+
+function formatMoneyFromCents(amountCents: number) {
+  return `R ${Math.round(amountCents / 100).toLocaleString("en-ZA").replaceAll(",", " ")}`;
+}
+
+function toRandUnits(amountCents: number) {
+  return Math.round(amountCents / 100);
+}
+
+function verificationFromCheck(status?: string | null, approved?: boolean | null): VerificationState {
+  if (typeof approved === "boolean") return approved ? "PASS" : "FAIL";
+  switch (status) {
+    case "approved":
+      return "PASS";
+    case "declined":
+      return "FAIL";
+    case "manual_review":
+      return "REVIEW";
+    case "pending":
+      return "PENDING";
+    default:
+      return "N_A";
+  }
+}
+
+function checkoutStatusFromRow(input: {
+  paymentStatus: string;
+  deliveryStatus?: string | null;
+  riskDecision?: string | null;
+  reviewStatus?: string | null;
+}): CheckoutStatus {
+  if (input.reviewStatus === "open" || input.reviewStatus === "assigned" || input.riskDecision === "manual_review") {
+    return "BLOCKED";
+  }
+  if (input.deliveryStatus === "active") return "IN_TRANSIT";
+  if (input.paymentStatus === "reconciled") return "COMPLETED";
+  return "PENDING";
 }
 
 function randomCode(prefix: string, size = 5) {
@@ -703,6 +811,17 @@ async function mapTransaction(row: {
 }) {
   const email = await getPrimaryEmail(row.customer_id);
   const risk = row.checkout_session_id ? await getLatestRiskAssessment(row.checkout_session_id) : null;
+  const review = row.checkout_session_id
+    ? await queryOne<{ status: string | null }>(
+        `select mrc.status
+         from ${table("manual_review_cases")} mrc
+         join ${table("verification_cases")} vc on vc.id = mrc.verification_case_id
+         where vc.checkout_session_id = $1
+         order by mrc.opened_at desc
+         limit 1`,
+        [row.checkout_session_id],
+      )
+    : null;
   return {
     id: row.id,
     customer_id: email,
@@ -715,6 +834,7 @@ async function mapTransaction(row: {
     risk_score: risk?.score ?? null,
     risk_decision: risk?.decision ?? null,
     risk_level: risk?.decision ?? null,
+    review_status: review?.status ?? null,
     qr_payload: signedQrPayload({
       transactionId: row.id,
       amountCents: Number(row.amount_cents),
@@ -1041,6 +1161,8 @@ export async function confirmCheckoutDetails(input: ConfirmCheckoutDetailsInput)
 export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
   const session = await getCheckoutSessionByCode(input.sessionId);
   if (!session) throw new Error("session_not_found");
+  const affordabilityIncome = input.experianIncome ?? null;
+  const documentContext = input.documentContext || {};
   const projectedDecision = input.projectedDecision || (input.approved ? "auto_approve" : "manual_review_hold");
   const requiresManualReview = projectedDecision !== "auto_approve";
   const score = typeof input.projectedScore === "number"
@@ -1051,7 +1173,7 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
           0,
           Math.min(
             200,
-            Math.round((input.transunionApproved ? 10 : 45) + input.fraudScore * 100 + (input.experianIncome < 15000 ? 30 : 10)),
+            Math.round((input.transunionApproved ? 10 : 45) + input.fraudScore * 100),
           ),
         );
   const persistedDecision = requiresManualReview ? "manual_review" : "auto_approve";
@@ -1096,8 +1218,9 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
         screeningMode: input.screeningMode,
         transunionScore: input.transunionScore,
         transunionApproved: input.transunionApproved,
-        experianIncome: input.experianIncome,
+        experianIncome: affordabilityIncome,
         fraudScore: input.fraudScore,
+        documentContext,
         projectedScore: score,
         projectedDecision,
         projectedFactors: input.projectedFactors || [],
@@ -1109,7 +1232,6 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
   const signals = [
     { signalCode: "CREDIT_SCORE", source: input.bureau, points: input.transunionApproved ? 10 : 45, value: String(input.transunionScore ?? 0), detail: `Credit bureau ${input.bureau} score evaluated.` },
     { signalCode: "KYC_IDENTITY", source: "pondo", points: input.kycIdentityVerified ? 5 : 40, value: input.kycIdentityVerified ? "verified" : "failed", detail: "Identity and KYC status captured." },
-    { signalCode: "AFFORDABILITY", source: "experian", points: input.experianIncome >= 15000 ? 10 : 30, value: String(input.experianIncome), detail: "Affordability income evaluation completed." },
     { signalCode: "FRAUD_SCORE", source: "pondo-python", points: Math.round(input.fraudScore * 100), value: input.fraudScore.toFixed(2), detail: "Fraud scoring and geo-risk signal recorded." },
   ];
   for (const signal of signals) {
@@ -1127,15 +1249,15 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
      values
       ($1,'kyc',$2,'pondo','kyc-demo',now()),
       ($1,'credit',$3,$4,'credit-demo',now()),
-      ($1,'affordability',$5,'experian','affordability-demo',now()),
-      ($1,'fraud',$6,'pondo-python','fraud-demo',now())`,
+      ($1,'fraud',$5,'pondo-python','fraud-demo',now()),
+      ($1,'manual_review',$6,'pondo','manual-review-demo',now())`,
     [
       caseRow.id,
       input.kycIdentityVerified ? "approved" : "declined",
       input.transunionApproved ? "approved" : "declined",
       input.bureau,
-      input.experianIncome >= 15000 ? "approved" : "declined",
       requiresManualReview ? "declined" : "approved",
+      requiresManualReview ? "pending" : "skipped",
     ],
   );
 
@@ -1148,14 +1270,17 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
   await getPool().query(
     `insert into ${table("kyc_checks")}
       (verification_case_id, checkout_session_id, provider, provider_ref, id_document_type, result_status, response_payload)
-     values ($1,$2,'pondo','kyc-demo','sa_id',$3,$4)`,
-    [caseRow.id, session.id, input.kycIdentityVerified ? "approved" : "declined", JSON.stringify({ identityVerified: input.kycIdentityVerified })],
-  );
-  await getPool().query(
-    `insert into ${table("affordability_checks")}
-      (verification_case_id, checkout_session_id, provider, declared_income_cents, verified_income_cents, approved, response_payload)
-     values ($1,$2,'experian',$3,$4,$5,$6)`,
-    [caseRow.id, session.id, Math.round(input.experianIncome * 100), Math.round(input.experianIncome * 100), input.experianIncome >= 15000, JSON.stringify({ monthlyIncome: input.experianIncome })],
+     values ($1,$2,'pondo','kyc-demo',$3,$4,$5)`,
+    [
+      caseRow.id,
+      session.id,
+      documentContext.identityDocumentType || "sa_id",
+      input.kycIdentityVerified ? "approved" : "declined",
+      JSON.stringify({
+        identityVerified: input.kycIdentityVerified,
+        documentContext,
+      }),
+    ],
   );
   await getPool().query(
     `insert into ${table("fraud_checks")}
@@ -1168,7 +1293,12 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
       `insert into ${table("manual_review_cases")}
         (verification_case_id, queue_name, status, reason)
        values ($1,'fraud-ops','open',$2)`,
-      [caseRow.id, "Automated risk checks require manual review."],
+      [
+        caseRow.id,
+        documentContext.proofOfAddressRequired
+          ? "Automated risk checks require manual review and proof-of-address review."
+          : "Automated risk checks require manual review.",
+      ],
     );
   }
 
@@ -1465,32 +1595,7 @@ export async function settleOrder(input: {
     [transaction.order_id, input.actor],
   );
 
-  const existingProcess = await queryOne<{ id: string }>(
-    `select id from ${table("delivery_processes")} where payment_transaction_id = $1 limit 1`,
-    [transaction.id],
-  );
-  let processId = existingProcess?.id || null;
-  if (!processId) {
-    const created = await queryOne<{ id: string }>(
-      `insert into ${table("delivery_processes")}
-        (order_id, payment_transaction_id, status, progress_pct, active_step, started_at, updated_at)
-       values ($1,$2,'active',0,1,now(),now())
-       returning id`,
-      [transaction.order_id, transaction.id],
-    );
-    processId = created?.id || null;
-    if (processId) {
-      for (let index = 0; index < deliverySteps.length; index += 1) {
-        const step = deliverySteps[index];
-        await getPool().query(
-          `insert into ${table("delivery_process_steps")}
-            (delivery_process_id, step_index, step_code, title, detail, status)
-           values ($1,$2,$3,$4,$5,$6)`,
-          [processId, index + 1, step.code, step.title, step.detail, index === 0 ? "active" : "pending"],
-        );
-      }
-    }
-  }
+  await ensureDeliveryProcessStarted(transaction.order_id, transaction.id);
 
   if (transaction.checkout_session_id) {
     await getPool().query(
@@ -1611,6 +1716,681 @@ export async function getDeliveryProcess(id: string) {
     progressPct,
     activeStep,
     steps,
+  };
+}
+
+export async function resolveManualReview(input: {
+  actor: string;
+  transactionId: string;
+  decision: "approved" | "declined";
+}) {
+  const transaction = await getPaymentTransactionById(input.transactionId);
+  if (!transaction) throw new Error("not_found");
+  if (!transaction.checkout_session_id) throw new Error("manual_review_not_found");
+
+  const reviewCase = await queryOne<{
+    id: string;
+    verification_case_id: string;
+    status: string;
+  }>(
+    `select mrc.id, mrc.verification_case_id, mrc.status
+     from ${table("manual_review_cases")} mrc
+     join ${table("verification_cases")} vc on vc.id = mrc.verification_case_id
+     where vc.checkout_session_id = $1
+     order by mrc.opened_at desc
+     limit 1`,
+    [transaction.checkout_session_id],
+  );
+  if (!reviewCase) throw new Error("manual_review_not_found");
+
+  await getPool().query(
+    `update ${table("manual_review_cases")}
+     set status = $2,
+         resolved_at = now()
+     where id = $1`,
+    [reviewCase.id, input.decision],
+  );
+
+  await getPool().query(
+    `update ${table("verification_cases")}
+     set status = $2,
+         closed_at = now()
+     where id = $1`,
+    [reviewCase.verification_case_id, input.decision === "approved" ? "approved" : "declined"],
+  );
+
+  if (input.decision === "approved") {
+    await getPool().query(
+      `update ${table("payment_transactions")}
+       set status = 'processing',
+           updated_at = now()
+       where id = $1`,
+      [transaction.id],
+    );
+    await getPool().query(
+      `update ${table("checkout_sessions")}
+       set current_step = 'delivery_tracking',
+           status = 'payment_pending',
+           updated_at = now()
+       where id = $1`,
+      [transaction.checkout_session_id],
+    );
+    await getPool().query(
+      `update ${table("orders")}
+       set status = 'processing',
+           updated_at = now()
+       where id = $1`,
+      [transaction.order_id],
+    );
+    await getPool().query(
+      `insert into ${table("order_status_history")}
+        (order_id, from_status, to_status, reason, changed_by)
+       values ($1,'created','processing','Manual review approved - released to fulfilment',$2)`,
+      [transaction.order_id, input.actor],
+    );
+    await ensureDeliveryProcessStarted(transaction.order_id, transaction.id);
+    await createCheckoutSessionEvent(transaction.checkout_session_id, "manual_review.approved", input.actor, {
+      paymentTransactionId: transaction.id,
+      reviewCaseId: reviewCase.id,
+    });
+  } else {
+    await getPool().query(
+      `update ${table("checkout_sessions")}
+       set current_step = 'completed',
+           status = 'risk_failed',
+           updated_at = now()
+       where id = $1`,
+      [transaction.checkout_session_id],
+    );
+    await getPool().query(
+      `update ${table("orders")}
+       set status = 'cancelled',
+           updated_at = now()
+       where id = $1`,
+      [transaction.order_id],
+    );
+    await getPool().query(
+      `update ${table("payment_transactions")}
+       set status = 'cancelled',
+           gateway_status = 'failed',
+           updated_at = now()
+       where id = $1`,
+      [transaction.id],
+    );
+    await getPool().query(
+      `insert into ${table("order_status_history")}
+        (order_id, from_status, to_status, reason, changed_by)
+       values ($1,'created','cancelled','Manual review declined',$2)`,
+      [transaction.order_id, input.actor],
+    );
+    await createCheckoutSessionEvent(transaction.checkout_session_id, "manual_review.declined", input.actor, {
+      paymentTransactionId: transaction.id,
+      reviewCaseId: reviewCase.id,
+    });
+  }
+
+  await createAuditEvent({
+    category: "verification",
+    actorType: "admin",
+    actorId: input.actor,
+    customerId: transaction.customer_id,
+    checkoutSessionId: transaction.checkout_session_id,
+    orderId: transaction.order_id,
+    paymentTransactionId: transaction.id,
+    resourceType: "manual_review_case",
+    resourceId: reviewCase.id,
+    action: input.decision === "approved" ? "manual_review.approved" : "manual_review.declined",
+    metadata: { transactionId: transaction.id },
+  });
+
+  const updated = await getPaymentTransactionById(transaction.id);
+  if (!updated) throw new Error("payment_fetch_failed");
+  return { transaction: await mapTransaction(updated) };
+}
+
+async function ensureDeliveryProcessStarted(orderId: string, paymentTransactionId: string) {
+  const existingProcess = await queryOne<{ id: string }>(
+    `select id from ${table("delivery_processes")} where payment_transaction_id = $1 limit 1`,
+    [paymentTransactionId],
+  );
+  let processId = existingProcess?.id || null;
+  if (!processId) {
+    const created = await queryOne<{ id: string }>(
+      `insert into ${table("delivery_processes")}
+        (order_id, payment_transaction_id, status, progress_pct, active_step, started_at, updated_at)
+       values ($1,$2,'active',0,1,now(),now())
+       returning id`,
+      [orderId, paymentTransactionId],
+    );
+    processId = created?.id || null;
+    if (processId) {
+      for (let index = 0; index < deliverySteps.length; index += 1) {
+        const step = deliverySteps[index];
+        await getPool().query(
+          `insert into ${table("delivery_process_steps")}
+            (delivery_process_id, step_index, step_code, title, detail, status)
+           values ($1,$2,$3,$4,$5,$6)`,
+          [processId, index + 1, step.code, step.title, step.detail, index === 0 ? "active" : "pending"],
+        );
+      }
+    }
+  }
+}
+
+export async function getAdminDashboard(): Promise<AdminDashboardData> {
+  const [recentRows, kycRows, settlementRow, reviewRow, reviewQueueRows, orderStatusRows, txVolumeRows, kycTrendRows, partnerRows, revenueRows] = await Promise.all([
+    getPool().query<{
+      transaction_id: string;
+      created_at: string;
+      amount_cents: number;
+      payment_status: string;
+      customer_name: string | null;
+      product_name: string | null;
+      partner_name: string | null;
+      credit_approved: boolean | null;
+      kyc_status: string | null;
+      fraud_status: string | null;
+      risk_decision: string | null;
+      review_status: string | null;
+      delivery_status: string | null;
+    }>(
+      `select pt.id as transaction_id,
+              pt.created_at,
+              pt.amount_cents,
+              pt.status as payment_status,
+              cp.full_name as customer_name,
+              oi.product_name,
+              p.display_name as partner_name,
+              cc.approved as credit_approved,
+              kc.result_status as kyc_status,
+              fc.result_status as fraud_status,
+              ra.decision as risk_decision,
+              mrc.status as review_status,
+              dp.status as delivery_status
+       from ${table("payment_transactions")} pt
+       join ${table("orders")} o on o.id = pt.order_id
+       join ${table("customer_profiles")} cp on cp.id = pt.customer_id
+       left join ${table("partners")} p on p.id = o.partner_id
+       left join lateral (
+         select product_name
+         from ${table("order_items")}
+         where order_id = o.id
+         order by id asc
+         limit 1
+       ) oi on true
+       left join lateral (
+         select decision
+         from ${table("risk_assessments")}
+         where checkout_session_id = pt.checkout_session_id
+         order by assessed_at desc
+         limit 1
+       ) ra on true
+       left join lateral (
+         select approved
+         from ${table("credit_checks")}
+         where checkout_session_id = pt.checkout_session_id
+         order by checked_at desc
+         limit 1
+       ) cc on true
+       left join lateral (
+         select result_status
+         from ${table("kyc_checks")}
+         where checkout_session_id = pt.checkout_session_id
+         order by checked_at desc
+         limit 1
+       ) kc on true
+       left join lateral (
+         select result_status
+         from ${table("fraud_checks")}
+         where checkout_session_id = pt.checkout_session_id
+         order by checked_at desc
+         limit 1
+       ) fc on true
+       left join lateral (
+         select status
+         from ${table("manual_review_cases")} mrc
+         join ${table("verification_cases")} vc on vc.id = mrc.verification_case_id
+         where vc.checkout_session_id = pt.checkout_session_id
+         order by mrc.opened_at desc
+         limit 1
+       ) mrc on true
+       left join lateral (
+         select status
+         from ${table("delivery_processes")}
+         where payment_transaction_id = pt.id
+         order by updated_at desc nulls last, started_at desc nulls last
+         limit 1
+       ) dp on true
+       order by pt.created_at desc
+       limit 12`,
+    ),
+    getPool().query<{
+      assessment_id: string;
+      assessed_at: string;
+      customer_name: string | null;
+      amount_cents: number | null;
+      product_name: string | null;
+      verification_status: string;
+      decision: string;
+      credit_approved: boolean | null;
+      kyc_status: string | null;
+      fraud_status: string | null;
+      review_status: string | null;
+    }>(
+      `select ra.id as assessment_id,
+              ra.assessed_at,
+              cp.full_name as customer_name,
+              o.total_cents as amount_cents,
+              oi.product_name,
+              ra.verification_status,
+              ra.decision,
+              cc.approved as credit_approved,
+              kc.result_status as kyc_status,
+              fc.result_status as fraud_status,
+              mrc.status as review_status
+       from ${table("risk_assessments")} ra
+       join ${table("customer_profiles")} cp on cp.id = ra.customer_id
+       left join ${table("orders")} o on o.id = ra.order_id
+       left join lateral (
+         select product_name
+         from ${table("order_items")}
+         where order_id = o.id
+         order by id asc
+         limit 1
+       ) oi on true
+       left join lateral (
+         select approved
+         from ${table("credit_checks")}
+         where checkout_session_id = ra.checkout_session_id
+         order by checked_at desc
+         limit 1
+       ) cc on true
+       left join lateral (
+         select result_status
+         from ${table("kyc_checks")}
+         where checkout_session_id = ra.checkout_session_id
+         order by checked_at desc
+         limit 1
+       ) kc on true
+       left join lateral (
+         select result_status
+         from ${table("fraud_checks")}
+         where checkout_session_id = ra.checkout_session_id
+         order by checked_at desc
+         limit 1
+       ) fc on true
+       left join lateral (
+         select mrc.status
+         from ${table("manual_review_cases")} mrc
+         join ${table("verification_cases")} vc on vc.id = mrc.verification_case_id
+         where vc.checkout_session_id = ra.checkout_session_id
+         order by mrc.opened_at desc
+         limit 1
+       ) mrc on true
+       order by ra.assessed_at desc
+       limit 12`,
+    ),
+    queryOne<{
+      reconciled_count: string | number;
+      pending_count: string | number;
+      reconciled_gross_cents: string | number;
+      settled_net_cents: string | number;
+      latest_settled_at: string | null;
+    }>(
+      `select
+          count(*) filter (where pt.status = 'reconciled') as reconciled_count,
+          count(*) filter (where pt.status in ('initiated', 'authorized', 'processing')) as pending_count,
+          coalesce(sum(case when pt.status = 'reconciled' then pt.amount_cents else 0 end), 0) as reconciled_gross_cents,
+          coalesce(sum(ps.net_amount_cents), 0) as settled_net_cents,
+          max(ps.settled_at) as latest_settled_at
+       from ${table("payment_transactions")} pt
+       left join ${table("payment_settlements")} ps on ps.payment_transaction_id = pt.id`,
+    ),
+    queryOne<{
+      open_count: string | number;
+      assigned_count: string | number;
+      resolved_count: string | number;
+      latest_opened_at: string | null;
+    }>(
+      `select
+          count(*) filter (where status = 'open') as open_count,
+          count(*) filter (where status = 'assigned') as assigned_count,
+          count(*) filter (where status in ('approved', 'declined', 'cancelled')) as resolved_count,
+          max(opened_at) filter (where status in ('open', 'assigned')) as latest_opened_at
+       from ${table("manual_review_cases")}`,
+    ),
+    getPool().query<{
+      case_id: string;
+      customer_name: string | null;
+      reason: string;
+      risk_decision: string | null;
+      amount_cents: number | null;
+      product_name: string | null;
+      queue_name: string;
+      status: string;
+      opened_at: string;
+    }>(
+      `select mrc.id as case_id,
+              cp.full_name as customer_name,
+              mrc.reason,
+              ra.decision as risk_decision,
+              o.total_cents as amount_cents,
+              oi.product_name,
+              mrc.queue_name,
+              mrc.status,
+              mrc.opened_at
+       from ${table("manual_review_cases")} mrc
+       join ${table("verification_cases")} vc on vc.id = mrc.verification_case_id
+       join ${table("customer_profiles")} cp on cp.id = vc.customer_id
+       left join lateral (
+         select decision, order_id
+         from ${table("risk_assessments")}
+         where checkout_session_id = vc.checkout_session_id
+         order by assessed_at desc
+         limit 1
+       ) ra on true
+       left join ${table("orders")} o on o.id = ra.order_id
+       left join lateral (
+         select product_name
+         from ${table("order_items")}
+         where order_id = o.id
+         order by id asc
+         limit 1
+       ) oi on true
+       where mrc.status in ('open', 'assigned')
+       order by mrc.opened_at desc
+       limit 10`,
+    ),
+    getPool().query<{
+      status: string;
+      order_count: string | number;
+      total_amount_cents: string | number;
+    }>(
+      `select o.status,
+              count(*) as order_count,
+              coalesce(sum(o.total_cents), 0) as total_amount_cents
+       from ${table("orders")} o
+       group by o.status
+       order by order_count desc, o.status asc`,
+    ),
+    getPool().query<{
+      bucket: string;
+      completed: string | number;
+      failed: string | number;
+      pending: string | number;
+    }>(
+      `select to_char(date_trunc('hour', created_at), 'HH24:MI') as bucket,
+              count(*) filter (where status = 'reconciled') as completed,
+              count(*) filter (where status in ('failed', 'cancelled', 'refunded')) as failed,
+              count(*) filter (where status in ('initiated', 'authorized', 'processing')) as pending
+       from ${table("payment_transactions")}
+       where created_at >= now() - interval '8 hours'
+       group by 1
+       order by min(date_trunc('hour', created_at)) asc`,
+    ),
+    getPool().query<{
+      day_bucket: string;
+      cleared: string | number;
+      review: string | number;
+      blocked: string | number;
+    }>(
+      `select to_char(date_trunc('day', assessed_at), 'YYYY-MM-DD') as day_bucket,
+              count(*) filter (where decision = 'auto_approve') as cleared,
+              count(*) filter (where decision = 'manual_review') as review,
+              count(*) filter (where decision not in ('auto_approve', 'manual_review')) as blocked
+       from ${table("risk_assessments")}
+       where assessed_at >= now() - interval '7 days'
+       group by 1
+       order by min(date_trunc('day', assessed_at)) asc`,
+    ),
+    getPool().query<{
+      partner_name: string;
+      orders_count: string | number;
+      delivered_count: string | number;
+    }>(
+      `select coalesce(p.display_name, 'Direct') as partner_name,
+              count(distinct o.id) as orders_count,
+              count(distinct case when pt.status = 'reconciled' then o.id end) as delivered_count
+       from ${table("orders")} o
+       left join ${table("partners")} p on p.id = o.partner_id
+       left join ${table("payment_transactions")} pt on pt.order_id = o.id
+       group by 1
+       order by orders_count desc, partner_name asc
+       limit 5`,
+    ),
+    getPool().query<{
+      week_bucket: string;
+      revenue_cents: string | number;
+    }>(
+      `select to_char(date_trunc('week', coalesce(settled_at, reconciled_at, created_at)), 'YYYY-MM-DD') as week_bucket,
+              coalesce(sum(amount_cents), 0) as revenue_cents
+       from ${table("payment_transactions")}
+       where coalesce(settled_at, reconciled_at, created_at) >= now() - interval '28 days'
+         and status = 'reconciled'
+       group by 1
+       order by min(date_trunc('week', coalesce(settled_at, reconciled_at, created_at))) asc`,
+    ),
+  ]);
+
+  const recentTransactions: CheckoutRecord[] = recentRows.rows.map((row) => ({
+    id: row.transaction_id.slice(0, 8),
+    consumer: row.customer_name || "Unknown customer",
+    product: row.product_name || "Basket checkout",
+    partner: row.partner_name || "Direct",
+    amount: toRandUnits(Number(row.amount_cents || 0)),
+    itc: verificationFromCheck(null, row.credit_approved),
+    kyc: verificationFromCheck(row.kyc_status),
+    vetting: verificationFromCheck(row.fraud_status),
+    status: checkoutStatusFromRow({
+      paymentStatus: row.payment_status,
+      deliveryStatus: row.delivery_status,
+      riskDecision: row.risk_decision,
+      reviewStatus: row.review_status,
+    }),
+    driver: row.delivery_status === "active" ? "Dispatch active" : null,
+    time: formatTime(row.created_at),
+  }));
+
+  const kycAuditRecords: KycAuditRecord[] = kycRows.rows.map((row) => {
+    const status: KycAuditRecord["status"] =
+      row.review_status === "open" || row.review_status === "assigned" || row.decision === "manual_review"
+        ? "REVIEW"
+        : row.decision === "auto_approve"
+          ? "CLEARED"
+          : "BLOCKED";
+
+    return {
+      ref: row.assessment_id.slice(0, 8),
+      consumer: row.customer_name || "Unknown customer",
+      saIdMasked: "Protected",
+      itc: verificationFromCheck(null, row.credit_approved),
+      kyc: verificationFromCheck(row.kyc_status),
+      vetting: verificationFromCheck(row.fraud_status),
+      status,
+      time: formatTime(row.assessed_at, true),
+      product: row.product_name || "Basket checkout",
+      amount: toRandUnits(Number(row.amount_cents || 0)),
+    };
+  });
+
+  const manualReview = {
+    open: Number(reviewRow?.open_count || 0),
+    assigned: Number(reviewRow?.assigned_count || 0),
+    resolved: Number(reviewRow?.resolved_count || 0),
+    latestOpenedAt: reviewRow?.latest_opened_at || null,
+  };
+
+  const manualReviewQueue = reviewQueueRows.rows.map((row) => ({
+    id: row.case_id.slice(0, 8),
+    customer: row.customer_name || "Unknown customer",
+    reason: row.reason,
+    riskDecision: row.risk_decision || "manual_review",
+    amount: toRandUnits(Number(row.amount_cents || 0)),
+    product: row.product_name || "Basket checkout",
+    queue: row.queue_name,
+    status: row.status,
+    openedAt: row.opened_at,
+  }));
+
+  const orderStatuses = orderStatusRows.rows.map((row) => ({
+    status: row.status,
+    count: Number(row.order_count || 0),
+    amount: toRandUnits(Number(row.total_amount_cents || 0)),
+  }));
+
+  const settlement = {
+    reconciledCount: Number(settlementRow?.reconciled_count || 0),
+    pendingCount: Number(settlementRow?.pending_count || 0),
+    reconciledGross: toRandUnits(Number(settlementRow?.reconciled_gross_cents || 0)),
+    settledNet: toRandUnits(Number(settlementRow?.settled_net_cents || 0)),
+    latestSettledAt: settlementRow?.latest_settled_at || null,
+  };
+
+  const reviewBacklog = manualReview.open + manualReview.assigned;
+  const clearanceBase = kycAuditRecords.length || 1;
+  const clearanceRate = ((kycAuditRecords.filter((row) => row.status === "CLEARED").length / clearanceBase) * 100).toFixed(1);
+
+  const txVolumeLookup = new Map(
+    txVolumeRows.rows.map((row) => [
+      row.bucket,
+      {
+        completed: Number(row.completed || 0),
+        failed: Number(row.failed || 0),
+        pending: Number(row.pending || 0),
+      },
+    ]),
+  );
+  const txVolumeData: TxVolumePoint[] = Array.from({ length: 8 }, (_, index) => {
+    const bucketDate = new Date();
+    bucketDate.setMinutes(0, 0, 0);
+    bucketDate.setHours(bucketDate.getHours() - (7 - index));
+    const label = formatHourLabel(bucketDate);
+    const point = txVolumeLookup.get(label);
+    return {
+      hour: label,
+      completed: point?.completed ?? 0,
+      failed: point?.failed ?? 0,
+      pending: point?.pending ?? 0,
+    };
+  });
+
+  const kycTrendLookup = new Map(
+    kycTrendRows.rows.map((row) => [
+      row.day_bucket,
+      {
+        pass: Number(row.cleared || 0),
+        review: Number(row.review || 0),
+        fail: Number(row.blocked || 0),
+      },
+    ]),
+  );
+  const kycTrendData: KycTrendPoint[] = Array.from({ length: 7 }, (_, index) => {
+    const day = startOfDay(new Date());
+    day.setDate(day.getDate() - (6 - index));
+    const key = day.toISOString().slice(0, 10);
+    const point = kycTrendLookup.get(key);
+    return {
+      day: formatDayLabel(day),
+      pass: point?.pass ?? 0,
+      review: point?.review ?? 0,
+      fail: point?.fail ?? 0,
+    };
+  });
+
+  const pieCounts = {
+    cleared: kycAuditRecords.filter((row) => row.status === "CLEARED").length,
+    review: kycAuditRecords.filter((row) => row.status === "REVIEW").length,
+    blocked: kycAuditRecords.filter((row) => row.status === "BLOCKED").length,
+    itcPass: kycAuditRecords.filter((row) => row.itc === "PASS").length,
+    vettingPass: kycAuditRecords.filter((row) => row.vetting === "PASS").length,
+  };
+  const kycPieData: KycPieSlice[] = [
+    { name: "ITC Pass", value: Math.max(pieCounts.itcPass, 0), color: "#34d399" },
+    { name: "Cleared", value: Math.max(pieCounts.cleared, 0), color: "#4A7FA5" },
+    { name: "Vetting Pass", value: Math.max(pieCounts.vettingPass, 0), color: "#1B2A4A" },
+    { name: "Blocked", value: Math.max(pieCounts.blocked, 0), color: "#ef4444" },
+    { name: "Review", value: Math.max(pieCounts.review, 0), color: "#f5b642" },
+  ].filter((slice) => slice.value > 0);
+
+  const partnerPerformanceData: PartnerPerformancePoint[] = partnerRows.rows.map((row) => {
+    const orders = Number(row.orders_count || 0);
+    const delivered = Number(row.delivered_count || 0);
+    return {
+      name: row.partner_name,
+      orders,
+      delivered,
+      success: orders > 0 ? Number(((delivered / orders) * 100).toFixed(1)) : 0,
+    };
+  });
+
+  const revenueLookup = new Map(
+    revenueRows.rows.map((row) => [row.week_bucket, Number(row.revenue_cents || 0)]),
+  );
+  const revenueTrendData: RevenueTrendPoint[] = Array.from({ length: 4 }, (_, index) => {
+    const weekStart = startOfWeek(new Date());
+    weekStart.setDate(weekStart.getDate() - (21 - index * 7));
+    const key = weekStart.toISOString().slice(0, 10);
+    const revenue = toRandUnits(revenueLookup.get(key) || 0);
+    return {
+      week: formatWeekLabel(weekStart),
+      revenue,
+      target: Math.max(Math.round(revenue * 1.08), revenue > 0 ? revenue : 5000),
+    };
+  });
+
+  const kpis: KpiMetric[] = [
+    {
+      id: "revenue",
+      label: "Settled Net",
+      value: formatMoneyFromCents(Number(settlementRow?.settled_net_cents || 0)),
+      hint: `Latest settlement ${formatRelativeDay(settlement.latestSettledAt)}`,
+      accent: "#4e7dc8",
+      surface: "#233863",
+      icon: "REV",
+    },
+    {
+      id: "completed",
+      label: "Reconciled Txns",
+      value: settlement.reconciledCount.toLocaleString("en-ZA"),
+      hint: `${settlement.pendingCount} still pending reconciliation`,
+      accent: "#4e7dc8",
+      surface: "#eef6ff",
+      icon: "TXN",
+    },
+    {
+      id: "clearance",
+      label: "KYC Clearance",
+      value: `${clearanceRate}%`,
+      hint: `${kycAuditRecords.filter((row) => row.status === "REVIEW").length} in analyst review`,
+      accent: "#059669",
+      surface: "#dff8e8",
+      icon: "KYC",
+    },
+    {
+      id: "review",
+      label: "Manual Review Queue",
+      value: reviewBacklog.toLocaleString("en-ZA"),
+      hint: `${manualReview.assigned} assigned | ${manualReview.resolved} resolved`,
+      accent: "#ea6a3f",
+      surface: "#fff2bf",
+      icon: "MRQ",
+    },
+  ];
+
+  return {
+    kpis,
+    recentTransactions,
+    kycAuditRecords,
+    manualReview,
+    manualReviewQueue,
+    orderStatuses,
+    settlement,
+    txVolumeData,
+    kycPieData: kycPieData.length > 0 ? kycPieData : [{ name: "No activity", value: 1, color: "#4A7FA5" }],
+    kycTrendData,
+    revenueTrendData,
+    partnerPerformanceData,
+    generatedAt: nowIso(),
   };
 }
 
