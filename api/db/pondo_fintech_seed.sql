@@ -85,8 +85,19 @@ FROM (
     ('samsung-65-qled', 'Electronics', 'Samsung', '65" QLED 4K Smart TV', 'Premium QLED television for demo checkout flows.', 'TechHub SA'),
     ('samsung-s24', 'Electronics', 'Samsung', 'Galaxy S24 Ultra (256GB)', 'Flagship smartphone product used in PONDO demos.', 'TechHub SA'),
     ('apple-iphone-16', 'Electronics', 'Apple', 'iPhone 16 Pro (256GB)', 'High-value electronics item used in risk scoring flows.', 'TechHub SA'),
+    ('sony-wh1000xm6', 'Electronics', 'Sony', 'WH-1000XM6 Noise Cancelling Headphones', 'Premium audio product for trusted commerce demos.', 'TechHub SA'),
+    ('apple-airpods-pro', 'Electronics', 'Apple', 'AirPods Pro (2nd Gen)', 'Accessory product used for premium basket demos.', 'TechHub SA'),
+    ('canon-eos-r10', 'Electronics', 'Canon', 'EOS R10 Mirrorless Camera Kit', 'Creator electronics bundle for higher-value checkout demos.', 'TechHub SA'),
+    ('xbox-series-x', 'Electronics', 'Xbox', 'Xbox Series X Console', 'Gaming console SKU used in delivery and manual review demos.', 'TechHub SA'),
+    ('dyson-v15', 'Electronics', 'Dyson', 'V15 Detect Cordless Vacuum', 'Premium home tech appliance for bigger basket demos.', 'HomeTech SA'),
     ('nike-airmax', 'Fashion', 'Nike', 'Air Max 90 Sneakers', 'Footwear SKU for lower-value basket demos.', 'StyleHub SA'),
-    ('adidas-ultraboost', 'Fashion', 'Adidas', 'Ultraboost Running Shoes', 'Fashion SKU for basket and settlement demos.', 'StyleHub SA')
+    ('adidas-ultraboost', 'Fashion', 'Adidas', 'Ultraboost Running Shoes', 'Fashion SKU for basket and settlement demos.', 'StyleHub SA'),
+    ('redbaton-hoodie', 'Fashion', 'Redbaton', 'Oversized Fleece Hoodie', 'Comfort apparel item for affordable trusted-commerce baskets.', 'StyleHub SA'),
+    ('levi-501', 'Fashion', 'Levi''s', '501 Original Fit Jeans', 'Classic denim staple for broader fashion merchandising demos.', 'StyleHub SA'),
+    ('puma-rsx', 'Fashion', 'Puma', 'RS-X Heritage Sneakers', 'Streetwear sneaker line for category variety in the storefront.', 'StyleHub SA'),
+    ('converse-chuck-70', 'Fashion', 'Converse', 'Chuck 70 High Top', 'Timeless sneaker option for style-led browsing demos.', 'StyleHub SA'),
+    ('guess-denim-jacket', 'Fashion', 'Guess', 'Washed Denim Jacket', 'Layering piece for premium fashion catalogue expansion.', 'StyleHub SA'),
+    ('michael-kors-tote', 'Fashion', 'Michael Kors', 'Jet Set Leather Tote', 'Premium accessories item for higher-value fashion baskets.', 'StyleHub SA')
 ) AS seed(sku, category_name, brand, name, description, merchant_name)
 JOIN product_categories pc
   ON pc.name = seed.category_name
@@ -108,8 +119,19 @@ JOIN (
     ('samsung-65-qled', 1899900::bigint, 0.00::numeric),
     ('samsung-s24', 2799900::bigint, 10.00::numeric),
     ('apple-iphone-16', 3399900::bigint, 0.00::numeric),
+    ('sony-wh1000xm6', 899900::bigint, 12.00::numeric),
+    ('apple-airpods-pro', 599900::bigint, 8.00::numeric),
+    ('canon-eos-r10', 2299900::bigint, 6.00::numeric),
+    ('xbox-series-x', 1299900::bigint, 9.00::numeric),
+    ('dyson-v15', 1599900::bigint, 14.00::numeric),
     ('nike-airmax', 249990::bigint, 15.00::numeric),
-    ('adidas-ultraboost', 299990::bigint, 5.00::numeric)
+    ('adidas-ultraboost', 299990::bigint, 5.00::numeric),
+    ('redbaton-hoodie', 129990::bigint, 18.00::numeric),
+    ('levi-501', 159990::bigint, 10.00::numeric),
+    ('puma-rsx', 219990::bigint, 11.00::numeric),
+    ('converse-chuck-70', 189990::bigint, 7.00::numeric),
+    ('guess-denim-jacket', 239990::bigint, 9.00::numeric),
+    ('michael-kors-tote', 449990::bigint, 13.00::numeric)
 ) AS seed(sku, amount_cents, discount_pct)
   ON p.sku = seed.sku
 WHERE NOT EXISTS (

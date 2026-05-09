@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
+import { DEMO_CATALOG } from "@/lib/demoCatalog";
 import type {
   AdminDashboardData,
   CheckoutRecord,
@@ -71,6 +72,9 @@ type ProductRecord = {
   stock: number;
   merchantName: string;
 };
+
+const demoCatalogBySku = new Map(DEMO_CATALOG.map((product) => [product.id, product]));
+let demoCatalogSeedPromise: Promise<void> | null = null;
 
 type CheckoutSessionRecord = {
   id: string;
@@ -292,6 +296,88 @@ function defaultSeed(email: string): PartnerSeed {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+async function ensureDemoCatalogSeeded() {
+  if (!demoCatalogSeedPromise) {
+    demoCatalogSeedPromise = (async () => {
+      const pool = getPool();
+      for (const category of Array.from(new Set(DEMO_CATALOG.map((product) => product.category)))) {
+        await pool.query(
+          `insert into ${table("product_categories")} (name)
+           values ($1)
+           on conflict (name) do nothing`,
+          [category],
+        );
+      }
+
+      for (const product of DEMO_CATALOG) {
+        const categoryRow = await queryOne<{ id: string }>(
+          `select id from ${table("product_categories")} where name = $1 limit 1`,
+          [product.category],
+        );
+        if (!categoryRow) continue;
+
+        const productRow = await queryOne<{ id: string }>(
+          `insert into ${table("products")} (sku, category_id, brand, name, description, merchant_name, is_active)
+           values ($1,$2,$3,$4,$5,$6,true)
+           on conflict (sku) do update
+           set category_id = excluded.category_id,
+               brand = excluded.brand,
+               name = excluded.name,
+               description = excluded.description,
+               merchant_name = excluded.merchant_name,
+               is_active = excluded.is_active,
+               updated_at = now()
+           returning id`,
+          [
+            product.id,
+            categoryRow.id,
+            product.brand,
+            product.name,
+            product.description,
+            product.merchantName,
+          ],
+        );
+        if (!productRow) continue;
+
+        const activePrice = await queryOne<{ amount_cents: string | number; discount_pct: string | number | null }>(
+          `select amount_cents, discount_pct
+           from ${table("product_prices")}
+           where product_id = $1 and currency = 'ZAR' and effective_to is null
+           order by effective_from desc
+           limit 1`,
+          [productRow.id],
+        );
+
+        const activeAmount = activePrice ? Number(activePrice.amount_cents) : null;
+        const activeDiscount = activePrice ? Number(activePrice.discount_pct || 0) : null;
+        if (activeAmount === product.priceCents && activeDiscount === product.discountPct) {
+          continue;
+        }
+
+        if (activePrice) {
+          await pool.query(
+            `update ${table("product_prices")}
+             set effective_to = now()
+             where product_id = $1 and currency = 'ZAR' and effective_to is null`,
+            [productRow.id],
+          );
+        }
+
+        await pool.query(
+          `insert into ${table("product_prices")} (product_id, currency, amount_cents, discount_pct, effective_from)
+           values ($1,'ZAR',$2,$3,now())`,
+          [productRow.id, product.priceCents, product.discountPct],
+        );
+      }
+    })().catch((error) => {
+      demoCatalogSeedPromise = null;
+      throw error;
+    });
+  }
+
+  await demoCatalogSeedPromise;
 }
 
 function formatTime(iso: string | Date | null, withSeconds = false) {
@@ -628,6 +714,7 @@ async function ensureCustomerByEmail(email: string, override?: Partial<CustomerR
 }
 
 async function getProductBySku(sku: string): Promise<ProductRecord | null> {
+  await ensureDemoCatalogSeeded();
   const row = await queryOne<{
     id: string;
     sku: string;
@@ -660,6 +747,7 @@ async function getProductBySku(sku: string): Promise<ProductRecord | null> {
     [sku],
   );
   if (!row) return null;
+  const catalogProduct = demoCatalogBySku.get(row.sku);
   return {
     id: row.id,
     sku: row.sku,
@@ -668,7 +756,7 @@ async function getProductBySku(sku: string): Promise<ProductRecord | null> {
     category: row.category,
     priceCents: Number(row.price_cents),
     discountPct: Number(row.discount_pct || 0),
-    stock: demoStockForCategory(row.category),
+    stock: catalogProduct?.stock ?? demoStockForCategory(row.category),
     merchantName: row.merchant_name || "TechHub SA",
   };
 }
@@ -852,6 +940,7 @@ async function mapTransaction(row: {
 }
 
 export async function listProducts(q?: string, category?: string) {
+  await ensureDemoCatalogSeeded();
   const values: unknown[] = [];
   const filters = ["p.is_active = true"];
   if (category) {
@@ -904,17 +993,20 @@ export async function listProducts(q?: string, category?: string) {
   )) as { rows: Array<{ category: string }> };
 
   return {
-    items: rows.rows.map((row) => ({
-      id: row.sku,
-      brand: row.brand,
-      name: row.name,
-      category: row.category,
-      priceCents: Number(row.price_cents),
-      discountPct: Number(row.discount_pct || 0),
-      rating: 4.7,
-      stock: demoStockForCategory(row.category),
-      merchantName: row.merchant_name || "TechHub SA",
-    })),
+    items: rows.rows.map((row) => {
+      const catalogProduct = demoCatalogBySku.get(row.sku);
+      return {
+        id: row.sku,
+        brand: row.brand,
+        name: row.name,
+        category: row.category,
+        priceCents: Number(row.price_cents),
+        discountPct: Number(row.discount_pct || 0),
+        rating: catalogProduct?.rating ?? 4.7,
+        stock: catalogProduct?.stock ?? demoStockForCategory(row.category),
+        merchantName: row.merchant_name || "TechHub SA",
+      };
+    }),
     categories: categories.rows.map((row) => row.category),
   };
 }

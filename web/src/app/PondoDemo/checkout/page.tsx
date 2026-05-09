@@ -1467,7 +1467,7 @@ export default function PondoCheckoutPage() {
                       <div>
                         <h2 className="text-2xl font-extrabold text-pondo-navy-900">KYC Verification Pipeline</h2>
                         <p className="mt-2 max-w-2xl text-sm text-slate-700">
-                          This checkout requires elevated trust checks before the order can be released. IP and delivery mismatches are treated as risk signals, not fraud by default.
+                          This order requires an additional verification step before it can be released for fulfilment.
                         </p>
                       </div>
                       <div className={[
@@ -1484,7 +1484,6 @@ export default function PondoCheckoutPage() {
 
                     <div className="mt-5 space-y-3">
                       {[
-                        { title: "OTP Verification", detail: "SMS one-time pin sent to registered number", state: "Passed" },
                         {
                           title: "ID / Document Scan",
                           detail: requiresManualReviewDocuments
@@ -1492,14 +1491,12 @@ export default function PondoCheckoutPage() {
                               ? "South African ID validation and supporting document capture"
                               : "Driver's licence capture and identity confirmation"
                             : "South African ID validation and identity confirmation",
-                          state: requiresManualReviewDocuments ? (identityDocument ? "Pending" : "Pending") : (isSaidValid ? "Passed" : "Pending"),
+                          state: requiresManualReviewDocuments ? "Pending" : isSaidValid ? "Passed" : "Pending",
                         },
-                        { title: "ITC Credit Check", detail: "TransUnion / Experian credit bureau inquiry", state: vetResult?.transunionApproved ? "Passed" : "Review" },
-                        { title: "Fraud Screening", detail: "Geo-risk, device, and behaviour checks", state: vetResult?.approved ? "Passed" : "Review" },
                         {
                           title: "Manual Review Routing",
                           detail: projectedRisk.decision === "manual_review_hold"
-                            ? `Customer is flagged for analyst review after checks complete${requiresProofOfAddress ? " with proof-of-address review attached" : ""}`
+                            ? `Additional verification is required before analyst review${requiresProofOfAddress ? " with proof-of-address support attached" : ""}`
                             : "Not required for this checkout",
                           state: projectedRisk.decision === "manual_review_hold" ? "Pending" : "Skipped",
                         },
