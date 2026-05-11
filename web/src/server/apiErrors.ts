@@ -40,6 +40,10 @@ const ERROR_MAP: Record<string, ApiErrorConfig> = {
     message: "The order could not be created right now. Please try again.",
     retryable: true,
   },
+  cron_secret_missing: {
+    status: 503,
+    message: "Cron security is not configured in this environment yet.",
+  },
   customer_create_failed: {
     status: 503,
     message: "Customer data could not be prepared right now. Please try again.",
@@ -61,6 +65,10 @@ const ERROR_MAP: Record<string, ApiErrorConfig> = {
   invalid_auth: {
     status: 401,
     message: "Your session is no longer valid. Please sign in again.",
+  },
+  invalid_cron_secret: {
+    status: 401,
+    message: "This scheduled report request is not authorized.",
   },
   invalid_request: {
     status: 400,
@@ -108,6 +116,14 @@ const ERROR_MAP: Record<string, ApiErrorConfig> = {
   payment_declined: {
     status: 402,
     message: "The payment was declined.",
+  },
+  resend_api_key_missing: {
+    status: 503,
+    message: "The reporting email provider is not configured yet.",
+  },
+  resend_from_email_missing: {
+    status: 503,
+    message: "The reporting sender email is not configured yet.",
   },
   risk_assessment_failed: {
     status: 503,

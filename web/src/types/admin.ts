@@ -1,4 +1,13 @@
-export type AdminRole = "super_admin" | "operations_admin";
+export type AdminRole = "super_admin" | "operations_admin" | "analyst";
+
+export type AdminSection =
+  | "overview_kpis"
+  | "checkout_transactions"
+  | "manual_review_queue"
+  | "risk_kyc_vetting"
+  | "power_bi_extracts";
+
+export type AdminDashboardPeriod = "today" | "this_week" | "this_month" | "last_month";
 
 export interface AdminUser {
   id: string;
@@ -68,6 +77,7 @@ export interface AdminSettlementSummary {
   pendingCount: number;
   reconciledGross: number;
   settledNet: number;
+  pendingGross: number;
   latestSettledAt: string | null;
 }
 
@@ -89,6 +99,21 @@ export interface AdminOrderStatusItem {
   amount: number;
 }
 
+export interface AdminDashboardWindow {
+  period: AdminDashboardPeriod;
+  label: string;
+  compareLabel: string;
+  dateFrom: string;
+  dateTo: string;
+}
+
+export interface AdminReportAutomation {
+  refreshCadence: string;
+  refreshAnchor: string;
+  analystDigestSuggestion: string;
+  superAdminDigestSuggestion: string;
+}
+
 export interface AdminDashboardData {
   kpis: KpiMetric[];
   recentTransactions: CheckoutRecord[];
@@ -102,6 +127,8 @@ export interface AdminDashboardData {
   kycTrendData: KycTrendPoint[];
   revenueTrendData: RevenueTrendPoint[];
   partnerPerformanceData: PartnerPerformancePoint[];
+  window: AdminDashboardWindow;
+  automation: AdminReportAutomation;
   generatedAt: string;
 }
 
@@ -133,9 +160,9 @@ export interface KycTrendPoint {
 }
 
 export interface RevenueTrendPoint {
-  week: string;
+  label: string;
   revenue: number;
-  target: number;
+  comparison: number;
 }
 
 export interface KycPieSlice {

@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { DEMO_CATALOG } from "@/lib/demoCatalog";
 import type {
   AdminDashboardData,
+  AdminDashboardPeriod,
   CheckoutRecord,
   CheckoutStatus,
   KpiMetric,
@@ -122,6 +123,7 @@ type RecordRiskAssessmentInput = {
     proofOfAddressRequired?: boolean;
     proofOfAddressUploaded?: boolean;
     proofOfAddressFileName?: string;
+    documentAnalysis?: Record<string, unknown> | null;
   };
   projectedScore?: number;
   projectedDecision?: "auto_approve" | "elevated_verification" | "manual_review_hold";
@@ -129,6 +131,16 @@ type RecordRiskAssessmentInput = {
   city?: string;
   province?: string;
   postalCode?: string;
+};
+
+type RiskDocumentContext = {
+  identityDocumentType?: "sa_id" | "drivers_licence";
+  identityDocumentUploaded?: boolean;
+  identityDocumentFileName?: string;
+  proofOfAddressRequired?: boolean;
+  proofOfAddressUploaded?: boolean;
+  proofOfAddressFileName?: string;
+  documentAnalysis?: Record<string, unknown> | null;
 };
 
 const CORE_SCHEMA = "pondo_core";
@@ -390,19 +402,8 @@ function formatTime(iso: string | Date | null, withSeconds = false) {
   }).format(new Date(iso));
 }
 
-function formatRelativeDay(iso: string | null) {
-  if (!iso) return "No recent activity";
-  return new Intl.DateTimeFormat("en-ZA", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(iso));
-}
-
-function formatDayLabel(date: Date) {
-  return new Intl.DateTimeFormat("en-ZA", { weekday: "short" }).format(date);
+function formatMonthDayLabel(date: Date) {
+  return new Intl.DateTimeFormat("en-ZA", { day: "2-digit", month: "short" }).format(date);
 }
 
 function formatHourLabel(date: Date) {
@@ -411,6 +412,10 @@ function formatHourLabel(date: Date) {
 
 function startOfDay(date = new Date()) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function startOfMonth(date = new Date()) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
 function startOfWeek(date = new Date()) {
@@ -427,6 +432,95 @@ function formatWeekLabel(date: Date) {
   const firstDayOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
   const weekIndex = Math.floor((date.getDate() + firstDayOfMonth.getDay() - 1) / 7) + 1;
   return `W${weekIndex} ${month}`;
+}
+
+function getAdminDashboardWindow(period: AdminDashboardPeriod = "this_month") {
+  const now = new Date();
+  if (period === "today") {
+    const from = startOfDay(now);
+    return {
+      period,
+      label: "Today",
+      compareLabel: "Yesterday",
+      dateFrom: from.toISOString(),
+      dateTo: now.toISOString(),
+    };
+  }
+
+  if (period === "this_week") {
+    const from = startOfWeek(now);
+    return {
+      period,
+      label: "This Week",
+      compareLabel: "Last Week",
+      dateFrom: from.toISOString(),
+      dateTo: now.toISOString(),
+    };
+  }
+
+  if (period === "last_month") {
+    const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const to = new Date(now.getFullYear(), now.getMonth(), 1);
+    return {
+      period,
+      label: "Last Month",
+      compareLabel: "Previous Month",
+      dateFrom: from.toISOString(),
+      dateTo: to.toISOString(),
+    };
+  }
+
+  const from = startOfMonth(now);
+  const to = now;
+  return {
+    period,
+    label: "This Month",
+    compareLabel: "Last Month",
+    dateFrom: from.toISOString(),
+    dateTo: to.toISOString(),
+  };
+}
+
+function getAdminDashboardComparisonWindow(window: ReturnType<typeof getAdminDashboardWindow>) {
+  const from = new Date(window.dateFrom);
+  const to = new Date(window.dateTo);
+
+  if (window.period === "today") {
+    const compareFrom = new Date(from);
+    compareFrom.setDate(compareFrom.getDate() - 1);
+    const compareTo = new Date(compareFrom.getTime() + (to.getTime() - from.getTime()));
+    return { dateFrom: compareFrom.toISOString(), dateTo: compareTo.toISOString() };
+  }
+
+  if (window.period === "this_week") {
+    const compareFrom = new Date(from);
+    compareFrom.setDate(compareFrom.getDate() - 7);
+    const compareTo = new Date(compareFrom.getTime() + (to.getTime() - from.getTime()));
+    return { dateFrom: compareFrom.toISOString(), dateTo: compareTo.toISOString() };
+  }
+
+  if (window.period === "last_month") {
+    const compareFrom = new Date(from.getFullYear(), from.getMonth() - 1, 1);
+    return { dateFrom: compareFrom.toISOString(), dateTo: from.toISOString() };
+  }
+
+  const compareFrom = new Date(from.getFullYear(), from.getMonth() - 1, 1);
+  const monthBoundary = from;
+  const compareTo = new Date(compareFrom.getTime() + (to.getTime() - from.getTime()));
+  return {
+    dateFrom: compareFrom.toISOString(),
+    dateTo: (compareTo > monthBoundary ? monthBoundary : compareTo).toISOString(),
+  };
+}
+
+function formatRevenueDelta(currentCents: number, compareCents: number, compareLabel: string) {
+  if (compareCents === 0) {
+    return currentCents === 0 ? `No processed revenue in ${compareLabel.toLowerCase()}` : `No processed revenue recorded in ${compareLabel.toLowerCase()}`;
+  }
+
+  const deltaPct = ((currentCents - compareCents) / compareCents) * 100;
+  const direction = deltaPct >= 0 ? "+" : "";
+  return `${direction}${deltaPct.toFixed(1)}% vs ${compareLabel}`;
 }
 
 function formatMoneyFromCents(amountCents: number) {
@@ -830,8 +924,8 @@ async function getPaymentMethodRow(code: PaymentMethod) {
 }
 
 async function getLatestRiskAssessment(sessionId: string) {
-  return await queryOne<{ id: string; decision: string; verification_status: string; score: number }>(
-    `select id, decision, verification_status, score
+  return await queryOne<{ id: string; decision: string; verification_status: string; score: number; payload: Record<string, unknown> }>(
+    `select id, decision, verification_status, score, payload
      from ${table("risk_assessments")}
      where checkout_session_id = $1
      order by assessed_at desc
@@ -1009,6 +1103,42 @@ export async function listProducts(q?: string, category?: string) {
     }),
     categories: categories.rows.map((row) => row.category),
   };
+}
+
+async function syncDocumentContextToLatestRisk(sessionId: string, documentContext: RiskDocumentContext) {
+  const latestRisk = await getLatestRiskAssessment(sessionId);
+  if (!latestRisk) return;
+
+  const currentPayload =
+    latestRisk.payload && typeof latestRisk.payload === "object" && !Array.isArray(latestRisk.payload)
+      ? latestRisk.payload
+      : {};
+  const mergedPayload = {
+    ...currentPayload,
+    documentContext: {
+      ...(((currentPayload as { documentContext?: Record<string, unknown> }).documentContext) || {}),
+      ...documentContext,
+    },
+  };
+
+  await getPool().query(
+    `update ${table("risk_assessments")}
+     set payload = $2
+     where id = $1`,
+    [latestRisk.id, JSON.stringify(mergedPayload)],
+  );
+
+  await getPool().query(
+    `update ${table("kyc_checks")}
+     set response_payload = jsonb_set(
+       coalesce(response_payload, '{}'::jsonb),
+       '{documentContext}',
+       $2::jsonb,
+       true
+     )
+     where checkout_session_id = $1`,
+    [sessionId, JSON.stringify(documentContext)],
+  );
 }
 
 export async function bootstrapPartnerSession(partner: PartnerName, email: string) {
@@ -1435,6 +1565,7 @@ export async function createOrder(input: {
   riskContext?: {
     idNumber?: string;
     deviceFingerprint?: string;
+    documentContext?: RiskDocumentContext;
     clientGeo?: ClientGeo;
     validatedAddress?: ValidatedAddress;
     otpVerified?: boolean;
@@ -1519,6 +1650,9 @@ export async function createOrder(input: {
   );
 
   if (session?.id) {
+    if (input.riskContext?.documentContext) {
+      await syncDocumentContextToLatestRisk(session.id, input.riskContext.documentContext);
+    }
     await getPool().query(
       `update ${table("checkout_sessions")}
        set current_step = 'payment', status = 'payment_pending', updated_at = now()
@@ -1737,6 +1871,7 @@ export async function getOrder(id: string) {
   const transaction = await getPaymentTransactionById(id);
   if (!transaction) return null;
 
+  const latestRisk = transaction.checkout_session_id ? await getLatestRiskAssessment(transaction.checkout_session_id) : null;
   const [order, items, audit] = await Promise.all([
     queryOne<Record<string, unknown>>(`select * from ${table("orders")} where id = $1 limit 1`, [transaction.order_id]),
     getPool().query(`select * from ${table("order_items")} where order_id = $1 order by id asc`, [transaction.order_id]),
@@ -1754,6 +1889,15 @@ export async function getOrder(id: string) {
     details: {
       order,
       items: items.rows,
+      riskAssessment: latestRisk
+        ? {
+            id: latestRisk.id,
+            decision: latestRisk.decision,
+            verificationStatus: latestRisk.verification_status,
+            score: latestRisk.score,
+            payload: latestRisk.payload,
+          }
+        : null,
     },
     audit: audit.rows,
   };
@@ -1969,8 +2113,13 @@ async function ensureDeliveryProcessStarted(orderId: string, paymentTransactionI
   }
 }
 
-export async function getAdminDashboard(): Promise<AdminDashboardData> {
-  const [recentRows, kycRows, settlementRow, reviewRow, reviewQueueRows, orderStatusRows, txVolumeRows, kycTrendRows, partnerRows, revenueRows] = await Promise.all([
+export async function getAdminDashboard(options?: { period?: AdminDashboardPeriod }): Promise<AdminDashboardData> {
+  const window = getAdminDashboardWindow(options?.period || "this_month");
+  const comparisonWindow = getAdminDashboardComparisonWindow(window);
+  const periodValues = [window.dateFrom, window.dateTo];
+  const comparePeriodValues = [comparisonWindow.dateFrom, comparisonWindow.dateTo];
+
+  const [recentRows, kycRows, settlementRow, reviewRow, reviewQueueRows, orderStatusRows, txVolumeRows, kycTrendRows, partnerRows, revenueCurrentRows, revenueCompareRows] = await Promise.all([
     getPool().query<{
       transaction_id: string;
       created_at: string;
@@ -2053,8 +2202,11 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
          order by updated_at desc nulls last, started_at desc nulls last
          limit 1
        ) dp on true
+       where pt.created_at >= $1
+         and pt.created_at < $2
        order by pt.created_at desc
-       limit 12`,
+       limit 20`,
+      periodValues,
     ),
     getPool().query<{
       assessment_id: string;
@@ -2119,14 +2271,18 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
          order by mrc.opened_at desc
          limit 1
        ) mrc on true
+       where ra.assessed_at >= $1
+         and ra.assessed_at < $2
        order by ra.assessed_at desc
-       limit 12`,
+       limit 20`,
+      periodValues,
     ),
     queryOne<{
       reconciled_count: string | number;
       pending_count: string | number;
       reconciled_gross_cents: string | number;
       settled_net_cents: string | number;
+      pending_gross_cents: string | number;
       latest_settled_at: string | null;
     }>(
       `select
@@ -2134,9 +2290,13 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
           count(*) filter (where pt.status in ('initiated', 'authorized', 'processing')) as pending_count,
           coalesce(sum(case when pt.status = 'reconciled' then pt.amount_cents else 0 end), 0) as reconciled_gross_cents,
           coalesce(sum(ps.net_amount_cents), 0) as settled_net_cents,
+          coalesce(sum(case when pt.status in ('initiated', 'authorized', 'processing') then pt.amount_cents else 0 end), 0) as pending_gross_cents,
           max(ps.settled_at) as latest_settled_at
        from ${table("payment_transactions")} pt
-       left join ${table("payment_settlements")} ps on ps.payment_transaction_id = pt.id`,
+       left join ${table("payment_settlements")} ps on ps.payment_transaction_id = pt.id
+       where coalesce(ps.settled_at, pt.reconciled_at, pt.created_at) >= $1
+         and coalesce(ps.settled_at, pt.reconciled_at, pt.created_at) < $2`,
+      periodValues,
     ),
     queryOne<{
       open_count: string | number;
@@ -2149,7 +2309,10 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
           count(*) filter (where status = 'assigned') as assigned_count,
           count(*) filter (where status in ('approved', 'declined', 'cancelled')) as resolved_count,
           max(opened_at) filter (where status in ('open', 'assigned')) as latest_opened_at
-       from ${table("manual_review_cases")}`,
+       from ${table("manual_review_cases")}
+       where opened_at >= $1
+         and opened_at < $2`,
+      periodValues,
     ),
     getPool().query<{
       case_id: string;
@@ -2189,9 +2352,11 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
          order by id asc
          limit 1
        ) oi on true
-       where mrc.status in ('open', 'assigned')
+       where mrc.opened_at >= $1
+         and mrc.opened_at < $2
        order by mrc.opened_at desc
-       limit 10`,
+       limit 12`,
+      periodValues,
     ),
     getPool().query<{
       status: string;
@@ -2202,8 +2367,11 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
               count(*) as order_count,
               coalesce(sum(o.total_cents), 0) as total_amount_cents
        from ${table("orders")} o
+       where o.created_at >= $1
+         and o.created_at < $2
        group by o.status
        order by order_count desc, o.status asc`,
+      periodValues,
     ),
     getPool().query<{
       bucket: string;
@@ -2211,14 +2379,16 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
       failed: string | number;
       pending: string | number;
     }>(
-      `select to_char(date_trunc('hour', created_at), 'HH24:MI') as bucket,
+      `select to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as bucket,
               count(*) filter (where status = 'reconciled') as completed,
               count(*) filter (where status in ('failed', 'cancelled', 'refunded')) as failed,
               count(*) filter (where status in ('initiated', 'authorized', 'processing')) as pending
        from ${table("payment_transactions")}
-       where created_at >= now() - interval '8 hours'
+       where created_at >= $1
+         and created_at < $2
        group by 1
-       order by min(date_trunc('hour', created_at)) asc`,
+       order by min(date_trunc('day', created_at)) asc`,
+      periodValues,
     ),
     getPool().query<{
       day_bucket: string;
@@ -2231,9 +2401,11 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
               count(*) filter (where decision = 'manual_review') as review,
               count(*) filter (where decision not in ('auto_approve', 'manual_review')) as blocked
        from ${table("risk_assessments")}
-       where assessed_at >= now() - interval '7 days'
+       where assessed_at >= $1
+         and assessed_at < $2
        group by 1
        order by min(date_trunc('day', assessed_at)) asc`,
+      periodValues,
     ),
     getPool().query<{
       partner_name: string;
@@ -2246,21 +2418,40 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
        from ${table("orders")} o
        left join ${table("partners")} p on p.id = o.partner_id
        left join ${table("payment_transactions")} pt on pt.order_id = o.id
+       where o.created_at >= $1
+         and o.created_at < $2
        group by 1
        order by orders_count desc, partner_name asc
        limit 5`,
+      periodValues,
     ),
     getPool().query<{
-      week_bucket: string;
+      revenue_at: string;
       revenue_cents: string | number;
     }>(
-      `select to_char(date_trunc('week', coalesce(settled_at, reconciled_at, created_at)), 'YYYY-MM-DD') as week_bucket,
-              coalesce(sum(amount_cents), 0) as revenue_cents
-       from ${table("payment_transactions")}
-       where coalesce(settled_at, reconciled_at, created_at) >= now() - interval '28 days'
-         and status = 'reconciled'
-       group by 1
-       order by min(date_trunc('week', coalesce(settled_at, reconciled_at, created_at))) asc`,
+      `select coalesce(ps.settled_at, pt.reconciled_at, pt.created_at) as revenue_at,
+              coalesce(ps.net_amount_cents, pt.amount_cents) as revenue_cents
+       from ${table("payment_transactions")} pt
+       left join ${table("payment_settlements")} ps on ps.payment_transaction_id = pt.id
+       where coalesce(ps.settled_at, pt.reconciled_at, pt.created_at) >= $1
+         and coalesce(ps.settled_at, pt.reconciled_at, pt.created_at) < $2
+         and pt.status = 'reconciled'
+       order by coalesce(ps.settled_at, pt.reconciled_at, pt.created_at) asc`,
+      periodValues,
+    ),
+    getPool().query<{
+      revenue_at: string;
+      revenue_cents: string | number;
+    }>(
+      `select coalesce(ps.settled_at, pt.reconciled_at, pt.created_at) as revenue_at,
+              coalesce(ps.net_amount_cents, pt.amount_cents) as revenue_cents
+       from ${table("payment_transactions")} pt
+       left join ${table("payment_settlements")} ps on ps.payment_transaction_id = pt.id
+       where coalesce(ps.settled_at, pt.reconciled_at, pt.created_at) >= $1
+         and coalesce(ps.settled_at, pt.reconciled_at, pt.created_at) < $2
+         and pt.status = 'reconciled'
+       order by coalesce(ps.settled_at, pt.reconciled_at, pt.created_at) asc`,
+      comparePeriodValues,
     ),
   ]);
 
@@ -2335,6 +2526,7 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
     pendingCount: Number(settlementRow?.pending_count || 0),
     reconciledGross: toRandUnits(Number(settlementRow?.reconciled_gross_cents || 0)),
     settledNet: toRandUnits(Number(settlementRow?.settled_net_cents || 0)),
+    pendingGross: toRandUnits(Number(settlementRow?.pending_gross_cents || 0)),
     latestSettledAt: settlementRow?.latest_settled_at || null,
   };
 
@@ -2353,16 +2545,19 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
     ]),
   );
   const txVolumeData: TxVolumePoint[] = Array.from({ length: 8 }, (_, index) => {
-    const bucketDate = new Date();
-    bucketDate.setMinutes(0, 0, 0);
-    bucketDate.setHours(bucketDate.getHours() - (7 - index));
-    const label = formatHourLabel(bucketDate);
-    const point = txVolumeLookup.get(label);
+    const rangeDays = Math.max(
+      1,
+      Math.ceil((new Date(window.dateTo).getTime() - new Date(window.dateFrom).getTime()) / (1000 * 60 * 60 * 24)),
+    );
+    const bucketDate = startOfDay(new Date(window.dateTo));
+    const offset = Math.max(0, Math.floor((rangeDays - 1) * ((7 - index) / 7)));
+    bucketDate.setDate(bucketDate.getDate() - offset);
+    const key = bucketDate.toISOString().slice(0, 10);
     return {
-      hour: label,
-      completed: point?.completed ?? 0,
-      failed: point?.failed ?? 0,
-      pending: point?.pending ?? 0,
+      hour: formatMonthDayLabel(bucketDate),
+      completed: txVolumeLookup.get(key)?.completed ?? 0,
+      failed: txVolumeLookup.get(key)?.failed ?? 0,
+      pending: txVolumeLookup.get(key)?.pending ?? 0,
     };
   });
 
@@ -2377,12 +2572,17 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
     ]),
   );
   const kycTrendData: KycTrendPoint[] = Array.from({ length: 7 }, (_, index) => {
-    const day = startOfDay(new Date());
-    day.setDate(day.getDate() - (6 - index));
+    const rangeDays = Math.max(
+      1,
+      Math.ceil((new Date(window.dateTo).getTime() - new Date(window.dateFrom).getTime()) / (1000 * 60 * 60 * 24)),
+    );
+    const day = startOfDay(new Date(window.dateTo));
+    const offset = Math.max(0, Math.floor((rangeDays - 1) * ((6 - index) / 6)));
+    day.setDate(day.getDate() - offset);
     const key = day.toISOString().slice(0, 10);
     const point = kycTrendLookup.get(key);
     return {
-      day: formatDayLabel(day),
+      day: formatMonthDayLabel(day),
       pass: point?.pass ?? 0,
       review: point?.review ?? 0,
       fail: point?.fail ?? 0,
@@ -2415,54 +2615,109 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
     };
   });
 
-  const revenueLookup = new Map(
-    revenueRows.rows.map((row) => [row.week_bucket, Number(row.revenue_cents || 0)]),
-  );
-  const revenueTrendData: RevenueTrendPoint[] = Array.from({ length: 4 }, (_, index) => {
-    const weekStart = startOfWeek(new Date());
-    weekStart.setDate(weekStart.getDate() - (21 - index * 7));
-    const key = weekStart.toISOString().slice(0, 10);
-    const revenue = toRandUnits(revenueLookup.get(key) || 0);
+  const revenueBucketCount = window.period === "today" ? 8 : window.period === "this_week" ? 7 : 4;
+  const buildRevenueBucketDate = (index: number, sourceWindow: { dateFrom: string; dateTo: string }) => {
+    if (window.period === "today") {
+      const hour = new Date(sourceWindow.dateTo);
+      hour.setMinutes(0, 0, 0);
+      hour.setHours(hour.getHours() - (revenueBucketCount - 1 - index));
+      return hour;
+    }
+
+    if (window.period === "this_week") {
+      const day = new Date(sourceWindow.dateFrom);
+      day.setDate(day.getDate() + index);
+      return startOfDay(day);
+    }
+
+    const week = startOfWeek(new Date(sourceWindow.dateFrom));
+    week.setDate(week.getDate() + index * 7);
+    return week;
+  };
+
+  const formatRevenueBucketKey = (date: Date) => {
+    if (window.period === "today") {
+      return `${date.toISOString().slice(0, 13)}:00`;
+    }
+    return date.toISOString().slice(0, 10);
+  };
+
+  const formatRevenueBucketLabel = (date: Date) => {
+    if (window.period === "today") return formatHourLabel(date);
+    if (window.period === "this_week") return formatMonthDayLabel(date);
+    return formatWeekLabel(date);
+  };
+
+  const toRevenueBucketKey = (value: string) => {
+    const date = new Date(value);
+    if (window.period === "today") {
+      date.setMinutes(0, 0, 0);
+      return `${date.toISOString().slice(0, 13)}:00`;
+    }
+    if (window.period === "this_week") {
+      return startOfDay(date).toISOString().slice(0, 10);
+    }
+    return startOfWeek(date).toISOString().slice(0, 10);
+  };
+
+  const currentRevenueLookup = new Map<string, number>();
+  for (const row of revenueCurrentRows.rows) {
+    const key = toRevenueBucketKey(row.revenue_at);
+    currentRevenueLookup.set(key, (currentRevenueLookup.get(key) || 0) + Number(row.revenue_cents || 0));
+  }
+
+  const compareRevenueLookup = new Map<string, number>();
+  for (const row of revenueCompareRows.rows) {
+    const key = toRevenueBucketKey(row.revenue_at);
+    compareRevenueLookup.set(key, (compareRevenueLookup.get(key) || 0) + Number(row.revenue_cents || 0));
+  }
+
+  const revenueTrendData: RevenueTrendPoint[] = Array.from({ length: revenueBucketCount }, (_, index) => {
+    const currentBucket = buildRevenueBucketDate(index, window);
+    const compareBucket = buildRevenueBucketDate(index, comparisonWindow);
     return {
-      week: formatWeekLabel(weekStart),
-      revenue,
-      target: Math.max(Math.round(revenue * 1.08), revenue > 0 ? revenue : 5000),
+      label: formatRevenueBucketLabel(currentBucket),
+      revenue: toRandUnits(currentRevenueLookup.get(formatRevenueBucketKey(currentBucket)) || 0),
+      comparison: toRandUnits(compareRevenueLookup.get(formatRevenueBucketKey(compareBucket)) || 0),
     };
   });
+
+  const currentRevenueTotalCents = revenueCurrentRows.rows.reduce((sum, row) => sum + Number(row.revenue_cents || 0), 0);
+  const compareRevenueTotalCents = revenueCompareRows.rows.reduce((sum, row) => sum + Number(row.revenue_cents || 0), 0);
 
   const kpis: KpiMetric[] = [
     {
       id: "revenue",
       label: "Settled Net",
       value: formatMoneyFromCents(Number(settlementRow?.settled_net_cents || 0)),
-      hint: `Latest settlement ${formatRelativeDay(settlement.latestSettledAt)}`,
+      hint: formatRevenueDelta(currentRevenueTotalCents, compareRevenueTotalCents, window.compareLabel),
       accent: "#4e7dc8",
       surface: "#233863",
       icon: "REV",
     },
     {
-      id: "completed",
-      label: "Reconciled Txns",
-      value: settlement.reconciledCount.toLocaleString("en-ZA"),
-      hint: `${settlement.pendingCount} still pending reconciliation`,
+      id: "reconciled_gross",
+      label: "Reconciled Gross",
+      value: formatMoneyFromCents(Number(settlementRow?.reconciled_gross_cents || 0)),
+      hint: `${settlement.reconciledCount.toLocaleString("en-ZA")} processed transactions`,
       accent: "#4e7dc8",
       surface: "#eef6ff",
-      icon: "TXN",
+      icon: "GRS",
     },
     {
-      id: "clearance",
-      label: "KYC Clearance",
-      value: `${clearanceRate}%`,
-      hint: `${kycAuditRecords.filter((row) => row.status === "REVIEW").length} in analyst review`,
+      id: "pipeline",
+      label: "Pending Pipeline",
+      value: formatMoneyFromCents(Number(settlementRow?.pending_gross_cents || 0)),
+      hint: `${settlement.pendingCount.toLocaleString("en-ZA")} transactions awaiting reconciliation`,
       accent: "#059669",
       surface: "#dff8e8",
-      icon: "KYC",
+      icon: "PND",
     },
     {
       id: "review",
       label: "Manual Review Queue",
       value: reviewBacklog.toLocaleString("en-ZA"),
-      hint: `${manualReview.assigned} assigned | ${manualReview.resolved} resolved`,
+      hint: `${manualReview.assigned} assigned | ${manualReview.resolved} resolved | clearance ${clearanceRate}%`,
       accent: "#ea6a3f",
       surface: "#fff2bf",
       icon: "MRQ",
@@ -2482,6 +2737,13 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
     kycTrendData,
     revenueTrendData,
     partnerPerformanceData,
+    window,
+    automation: {
+      refreshCadence: "Daily",
+      refreshAnchor: "06:00 Africa/Johannesburg",
+      analystDigestSuggestion: "07:00 analyst queue digest for open, assigned, and ageing manual-review cases",
+      superAdminDigestSuggestion: "06:30 executive summary for settlements, revenue, clearance rate, and partner exceptions",
+    },
     generatedAt: nowIso(),
   };
 }
