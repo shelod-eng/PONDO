@@ -1,5 +1,5 @@
 import type { PaymentMethod } from "./paymentMethods";
-import type { AdminDashboardData } from "@/types/admin";
+import type { AdminDashboardData, AdminDashboardPeriod, AdminReportRun } from "@/types/admin";
 
 export type Role = "customer" | "sponsor";
 
@@ -570,8 +570,12 @@ export async function sponsorDemoOrders(token: string) {
   return apiFetch<{ items: Array<Transaction & { live?: boolean; details?: unknown }> }>("/api/pondo/sponsor/orders", { token });
 }
 
-export async function fetchAdminDashboard() {
-  return apiFetch<AdminDashboardData>("/api/pondo/admin/dashboard");
+export async function fetchAdminDashboard(period: AdminDashboardPeriod = "this_month") {
+  return apiFetch<AdminDashboardData>(`/api/pondo/admin/dashboard?period=${encodeURIComponent(period)}`);
+}
+
+export async function fetchAdminReportHistory(limit = 8) {
+  return apiFetch<{ items: AdminReportRun[] }>(`/api/pondo/admin/reports/history?limit=${encodeURIComponent(String(limit))}`);
 }
 
 export async function topUpWallet(

@@ -1,7 +1,15 @@
 import type { PartnerPerformancePoint } from "@/types/admin";
 
-export function PartnerPerfChart({ data }: { data: PartnerPerformancePoint[] }) {
-  const max = Math.max(...data.map((item) => item.orders));
+export function PartnerPerfChart({
+  data,
+  selectedPartner,
+  onSelectPartner,
+}: {
+  data: PartnerPerformancePoint[];
+  selectedPartner?: string | null;
+  onSelectPartner?: (point: PartnerPerformancePoint) => void;
+}) {
+  const max = Math.max(1, ...data.map((item) => item.orders));
 
   return (
     <article className="admin-panel rounded-[30px] p-6 text-white">
@@ -10,7 +18,16 @@ export function PartnerPerfChart({ data }: { data: PartnerPerformancePoint[] }) 
       <p className="mt-2 text-sm text-pondo-text-secondary">Orders dispatched vs delivered | success rate per partner</p>
       <div className="mt-6 space-y-5">
         {data.map((item) => (
-          <div key={item.name} className="grid gap-2 md:grid-cols-[140px_1fr] md:items-center">
+          <button
+            key={item.name}
+            type="button"
+            onClick={() => onSelectPartner?.(item)}
+            className={[
+              "grid gap-2 rounded-2xl px-3 py-3 text-left transition md:grid-cols-[140px_1fr] md:items-center",
+              onSelectPartner ? "cursor-pointer hover:bg-white/5" : "",
+              selectedPartner === item.name ? "bg-white/6 ring-1 ring-[#f5b642]" : "",
+            ].join(" ")}
+          >
             <div className="text-right text-xl font-bold leading-tight text-white">{item.name}</div>
             <div>
               <div className="relative h-7 rounded-full bg-[rgba(157,194,242,0.08)]">
@@ -18,15 +35,24 @@ export function PartnerPerfChart({ data }: { data: PartnerPerformancePoint[] }) 
                 <div className="absolute inset-y-0 left-0 rounded-full bg-[#34d399]" style={{ width: `${(item.delivered / max) * 100}%`, opacity: 0.95 }} />
               </div>
             </div>
-          </div>
+          </button>
         ))}
       </div>
       <div className="mt-8 flex flex-wrap gap-3 text-sm">
         {data.map((item) => (
-          <div key={item.name} className="rounded-2xl border border-[rgba(245,182,66,0.16)] bg-[rgba(245,182,66,0.08)] px-4 py-3">
+          <button
+            key={item.name}
+            type="button"
+            onClick={() => onSelectPartner?.(item)}
+            className={[
+              "rounded-2xl border border-[rgba(245,182,66,0.16)] bg-[rgba(245,182,66,0.08)] px-4 py-3 text-left transition",
+              onSelectPartner ? "cursor-pointer hover:brightness-110" : "",
+              selectedPartner === item.name ? "ring-1 ring-[#f5b642]" : "",
+            ].join(" ")}
+          >
             <div className="text-pondo-text-secondary">{item.name}</div>
             <div className="text-3xl font-black text-pondo-amber-400">{item.success}%</div>
-          </div>
+          </button>
         ))}
       </div>
       <div className="mt-4 flex gap-5 text-sm">

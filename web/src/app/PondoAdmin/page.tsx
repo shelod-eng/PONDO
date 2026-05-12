@@ -23,7 +23,7 @@ import {
   revenueTrendData,
   txVolumeData,
 } from "@/lib/adminData";
-import type { AdminDashboardData, AdminDashboardPeriod, AdminSection, AdminUser } from "@/types/admin";
+import type { AdminDashboardData, AdminDashboardPeriod, AdminSection, AdminUser, KpiMetric } from "@/types/admin";
 
 const powerBiReports = [
   {
@@ -95,6 +95,14 @@ function defaultSectionForAdmin(admin: AdminUser): AdminSection {
   return admin.role === "analyst" ? "manual_review_queue" : "overview_kpis";
 }
 
+type InsightState =
+  | { kind: "metric"; key: string }
+  | { kind: "tx_volume"; key: string }
+  | { kind: "kyc_mix"; key: string }
+  | { kind: "kyc_trend"; key: string }
+  | { kind: "revenue"; key: string }
+  | { kind: "partner"; key: string };
+
 function SectionHeader({
   eyebrow,
   title,
@@ -140,6 +148,51 @@ function StatCard({
   );
 }
 
+function InsightPanel({
+  title,
+  description,
+  items,
+  emptyLabel,
+}: {
+  title: string;
+  description: string;
+  items: Array<{ id: string; title: string; meta: string; amount?: string; accent?: string }>;
+  emptyLabel: string;
+}) {
+  return (
+    <section className="admin-panel rounded-[30px] p-6 text-white">
+      <div className="flex flex-col gap-3 border-b border-[rgba(45,78,116,0.7)] pb-5">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-pondo-sky-300">Click-through Insight</div>
+        <h2 className="text-3xl font-bold text-white">{title}</h2>
+        <p className="text-sm leading-7 text-pondo-text-secondary">{description}</p>
+      </div>
+      <div className="mt-5 grid gap-3">
+        {items.length > 0 ? (
+          items.map((item) => (
+            <article key={item.id} className="rounded-[22px] border border-[rgba(157,194,242,0.12)] bg-white/4 px-4 py-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-lg font-bold text-white">{item.title}</div>
+                  <div className="mt-1 text-sm text-pondo-text-secondary">{item.meta}</div>
+                </div>
+                {item.amount ? (
+                  <div className="text-right text-xl font-black" style={{ color: item.accent || "#f5b642" }}>
+                    {item.amount}
+                  </div>
+                ) : null}
+              </div>
+            </article>
+          ))
+        ) : (
+          <div className="rounded-[22px] border border-[rgba(157,194,242,0.12)] bg-white/4 px-4 py-5 text-sm text-pondo-text-secondary">
+            {emptyLabel}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export default function PondoAdminPage() {
   const [selectedAdminId, setSelectedAdminId] = useState(adminUsers[0].id);
   const [selectedPeriod, setSelectedPeriod] = useState<AdminDashboardPeriod>("this_month");
@@ -148,6 +201,7 @@ export default function PondoAdminPage() {
   const [dashboardState, setDashboardState] = useState<"loading" | "live" | "fallback">("loading");
   const [selectedOrderStatus, setSelectedOrderStatus] = useState<string>("ALL");
   const [selectedQueueStatus, setSelectedQueueStatus] = useState<string>("ALL");
+  const [selectedInsight, setSelectedInsight] = useState<InsightState | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -177,6 +231,7 @@ export default function PondoAdminPage() {
   useEffect(() => {
     setSelectedOrderStatus("ALL");
     setSelectedQueueStatus("ALL");
+    setSelectedInsight(null);
   }, [selectedPeriod]);
 
   const kpis = dashboard?.kpis ?? baseKpis.slice(0, 4);
@@ -188,6 +243,7 @@ export default function PondoAdminPage() {
   const liveKycTrendData = dashboard?.kycTrendData ?? kycTrendData;
   const liveRevenueTrendData = dashboard?.revenueTrendData ?? revenueTrendData;
   const livePartnerPerformanceData = dashboard?.partnerPerformanceData ?? partnerPerformanceData;
+  const reportHistory = dashboard?.reportHistory ?? [];
   const totalOrders = liveOrderStatuses.reduce((sum, item) => sum + item.count, 0);
   const totalOrderValue = liveOrderStatuses.reduce((sum, item) => sum + item.amount, 0);
   const dataStatusLabel =
@@ -206,6 +262,140 @@ export default function PondoAdminPage() {
       ),
     [dashboard?.manualReviewQueue, selectedQueueStatus],
   );
+
+  const analystPriorities = useMemo(
+    () =>
+      [...(dashboard?.manualReviewQueue ?? [])]
+        .sort((a, b) => {
+          const amountDelta = b.amount - a.amount;
+          if (amountDelta !== 0) return amountDelta;
+          return new Date(a.openedAt).getTime() - new Date(b.openedAt).getTime();
+        })
+        .slice(0, 3),
+    [dashboard?.manualReviewQueue],
+  );
+
+  const insightPanel = useMemo(() => {
+    if (!selectedInsight) return null;
+
+    if (selectedInsight.kind === "metric") {
+      if (selectedInsight.key === "revenue" || selectedInsight.key === "reconciled_gross" || selectedInsight.key === "pipeline") {
+        const filtered = liveCheckoutRecords
+          .filter((item) =>
+            selectedInsight.key === "pipeline"
+              ? item.status === "PENDING" || item.status === "BLOCKED"
+              : item.status === "COMPLETED" || item.status === "DELIVERED",
+          )
+          .slice(0, 6)
+          .map((item) => ({
+            id: item.id,
+            title: `${item.consumer} | ${item.product}`,
+            meta: `${item.partner} | ${item.status} | ${item.time}`,
+            amount: `R ${item.amount.toLocaleString("en-ZA")}`,
+          }));
+        return {
+          title: selectedInsight.key === "pipeline" ? "Pending revenue pipeline" : "Processed revenue drill-down",
+          description: "Transaction-level view behind the commercial KPI you selected.",
+          items: filtered,
+          emptyLabel: "No transactions match this commercial view in the current reporting window.",
+        };
+      }
+
+      const queueItems = (dashboard?.manualReviewQueue ?? []).slice(0, 6).map((item) => ({
+        id: item.id,
+        title: `${item.customer} | ${item.queue}`,
+        meta: `${item.status.toUpperCase()} | ${item.reason}`,
+        amount: `R ${item.amount.toLocaleString("en-ZA")}`,
+      }));
+      return {
+        title: "Manual review workload",
+        description: "Analyst case list tied directly to the selected KPI card.",
+        items: queueItems,
+        emptyLabel: "No manual review cases are available in this period.",
+      };
+    }
+
+    if (selectedInsight.kind === "tx_volume") {
+      const items = liveCheckoutRecords
+        .filter((item) => item.time === selectedInsight.key)
+        .map((item) => ({
+          id: item.id,
+          title: `${item.consumer} | ${item.status}`,
+          meta: `${item.product} | ${item.partner}`,
+          amount: `R ${item.amount.toLocaleString("en-ZA")}`,
+        }));
+      return {
+        title: `Transaction volume at ${selectedInsight.key}`,
+        description: "Operational transactions associated with the selected throughput bucket.",
+        items,
+        emptyLabel: "This bucket has no directly visible transactions in the current detail sample.",
+      };
+    }
+
+    if (selectedInsight.kind === "kyc_mix" || selectedInsight.kind === "kyc_trend") {
+      const items = liveKycAuditRecords
+        .filter((item) => {
+          if (selectedInsight.kind === "kyc_mix") {
+            const key = selectedInsight.key.toLowerCase();
+            return (
+              (key.includes("review") && item.status === "REVIEW") ||
+              (key.includes("blocked") && item.status === "BLOCKED") ||
+              (key.includes("clear") && item.status === "CLEARED") ||
+              (key.includes("itc") && item.itc === "PASS") ||
+              (key.includes("vetting") && item.vetting === "PASS")
+            );
+          }
+          return item.time.includes(selectedInsight.key) || item.status === "REVIEW";
+        })
+        .slice(0, 6)
+        .map((item) => ({
+          id: item.ref,
+          title: `${item.consumer} | ${item.status}`,
+          meta: `${item.product} | ${item.time}`,
+          amount: `R ${item.amount.toLocaleString("en-ZA")}`,
+        }));
+      return {
+        title: "Verification drill-down",
+        description: "Underlying verification records for the selected KYC insight.",
+        items,
+        emptyLabel: "No verification records match the selected slice right now.",
+      };
+    }
+
+    if (selectedInsight.kind === "revenue") {
+      const items = liveCheckoutRecords
+        .filter((item) => item.status === "COMPLETED" || item.status === "DELIVERED")
+        .slice(0, 6)
+        .map((item) => ({
+          id: item.id,
+          title: `${item.consumer} | ${selectedInsight.key}`,
+          meta: `${item.partner} | ${item.product}`,
+          amount: `R ${item.amount.toLocaleString("en-ZA")}`,
+        }));
+      return {
+        title: `Revenue bucket ${selectedInsight.key}`,
+        description: "Processed transaction examples for the selected revenue bucket.",
+        items,
+        emptyLabel: "No reconciled examples are visible for this revenue bucket.",
+      };
+    }
+
+    const items = liveCheckoutRecords
+      .filter((item) => item.partner === selectedInsight.key)
+      .slice(0, 6)
+      .map((item) => ({
+        id: item.id,
+        title: `${item.partner} | ${item.consumer}`,
+        meta: `${item.product} | ${item.status}`,
+        amount: `R ${item.amount.toLocaleString("en-ZA")}`,
+      }));
+    return {
+      title: `${selectedInsight.key} partner drill-down`,
+      description: "Recent transaction sample aligned to the selected fulfilment partner.",
+      items,
+      emptyLabel: "No partner transactions are visible in the current dashboard sample.",
+    };
+  }, [dashboard?.manualReviewQueue, liveCheckoutRecords, liveKycAuditRecords, selectedInsight]);
 
   const renderControlBar = () => (
     <section className="admin-panel rounded-[28px] p-5 text-white">
@@ -327,11 +517,23 @@ export default function PondoAdminPage() {
         </div>
       </div>
 
-      <KPICards metrics={kpis} />
+      <KPICards
+        metrics={kpis}
+        selectedMetricId={selectedInsight?.kind === "metric" ? selectedInsight.key : null}
+        onSelectMetric={(metric: KpiMetric) => setSelectedInsight({ kind: "metric", key: metric.id })}
+      />
 
       <div className="grid gap-8 xl:grid-cols-[2fr_1fr]">
-        <TxVolumeChart data={liveTxVolumeData} />
-        <KYCPieChart data={liveKycPieData} />
+        <TxVolumeChart
+          data={liveTxVolumeData}
+          selectedLabel={selectedInsight?.kind === "tx_volume" ? selectedInsight.key : null}
+          onSelectPoint={(point) => setSelectedInsight({ kind: "tx_volume", key: point.hour })}
+        />
+        <KYCPieChart
+          data={liveKycPieData}
+          selectedSlice={selectedInsight?.kind === "kyc_mix" ? selectedInsight.key : null}
+          onSelectSlice={(slice) => setSelectedInsight({ kind: "kyc_mix", key: slice.name })}
+        />
       </div>
 
       <div className="grid gap-8 xl:grid-cols-2">
@@ -339,9 +541,17 @@ export default function PondoAdminPage() {
           data={liveRevenueTrendData}
           currentLabel={dashboard?.window.label ?? "This Month"}
           comparisonLabel={dashboard?.window.compareLabel ?? "Last Month"}
+          selectedLabel={selectedInsight?.kind === "revenue" ? selectedInsight.key : null}
+          onSelectPoint={(point) => setSelectedInsight({ kind: "revenue", key: point.label })}
         />
-        <PartnerPerfChart data={livePartnerPerformanceData} />
+        <PartnerPerfChart
+          data={livePartnerPerformanceData}
+          selectedPartner={selectedInsight?.kind === "partner" ? selectedInsight.key : null}
+          onSelectPartner={(partner) => setSelectedInsight({ kind: "partner", key: partner.name })}
+        />
       </div>
+
+      {insightPanel ? <InsightPanel {...insightPanel} /> : null}
     </section>
   );
 
@@ -419,7 +629,7 @@ export default function PondoAdminPage() {
           />
         </div>
 
-        <div className="mt-6 flex flex-wrap gap-2">
+      <div className="mt-6 flex flex-wrap gap-2">
           {["ALL", "OPEN", "ASSIGNED"].map((status) => {
             const active = selectedQueueStatus === status;
             return (
@@ -438,6 +648,58 @@ export default function PondoAdminPage() {
             );
           })}
         </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.25fr_1fr]">
+        <section className="admin-panel rounded-[30px] p-6 text-white">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-pondo-sky-300">Analyst Workbench</div>
+          <h2 className="mt-2 text-3xl font-bold text-white">Priority queue for the next analyst action</h2>
+          <p className="mt-2 text-sm leading-7 text-pondo-text-secondary">
+            High-value and ageing cases rise to the top so the analyst can reduce blocked revenue before working lower-risk tickets.
+          </p>
+          <div className="mt-5 grid gap-3">
+            {analystPriorities.map((item, index) => (
+              <article key={item.id} className="rounded-[22px] border border-amber-400/18 bg-amber-400/10 px-4 py-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-amber-200">Priority {index + 1}</div>
+                    <div className="mt-1 text-xl font-bold text-white">{item.customer}</div>
+                    <div className="mt-1 text-sm text-amber-100/80">{item.reason}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-black text-white">R {item.amount.toLocaleString("en-ZA")}</div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-amber-100/80">{item.status.toUpperCase()} | {item.queue}</div>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="admin-panel rounded-[30px] p-6 text-white">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-pondo-sky-300">Workflow Signals</div>
+          <h2 className="mt-2 text-3xl font-bold text-white">What the analyst should do next</h2>
+          <div className="mt-5 grid gap-3">
+            <div className="rounded-[22px] border border-[rgba(157,194,242,0.12)] bg-white/4 px-4 py-4">
+              <div className="text-sm font-bold text-white">Assign unowned open cases first</div>
+              <div className="mt-1 text-sm text-pondo-text-secondary">
+                Focus on fresh `open` cases before older assigned tickets stall the queue.
+              </div>
+            </div>
+            <div className="rounded-[22px] border border-[rgba(157,194,242,0.12)] bg-white/4 px-4 py-4">
+              <div className="text-sm font-bold text-white">Clear highest blocked revenue next</div>
+              <div className="mt-1 text-sm text-pondo-text-secondary">
+                Basket value is a reliable proxy for recovery opportunity in the current workbench.
+              </div>
+            </div>
+            <div className="rounded-[22px] border border-[rgba(157,194,242,0.12)] bg-white/4 px-4 py-4">
+              <div className="text-sm font-bold text-white">Finish assigned cases before end-of-day digest</div>
+              <div className="mt-1 text-sm text-pondo-text-secondary">
+                This keeps the 18:00 operational carry-over digest focused on true exceptions.
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
 
       <div className="grid gap-4">
@@ -484,12 +746,21 @@ export default function PondoAdminPage() {
         />
 
         <div className="mt-6 grid gap-8 xl:grid-cols-[2fr_1fr]">
-          <KYCTrendChart data={liveKycTrendData} />
-          <KYCPieChart data={liveKycPieData} />
+          <KYCTrendChart
+            data={liveKycTrendData}
+            selectedLabel={selectedInsight?.kind === "kyc_trend" ? selectedInsight.key : null}
+            onSelectPoint={(point) => setSelectedInsight({ kind: "kyc_trend", key: point.day })}
+          />
+          <KYCPieChart
+            data={liveKycPieData}
+            selectedSlice={selectedInsight?.kind === "kyc_mix" ? selectedInsight.key : null}
+            onSelectSlice={(slice) => setSelectedInsight({ kind: "kyc_mix", key: slice.name })}
+          />
         </div>
       </div>
 
       <KYCPanel records={liveKycAuditRecords} />
+      {insightPanel ? <InsightPanel {...insightPanel} /> : null}
     </section>
   );
 
@@ -514,6 +785,48 @@ export default function PondoAdminPage() {
           ))}
         </div>
       </div>
+
+      <section className="admin-panel rounded-[30px] p-6 text-white">
+        <SectionHeader
+          eyebrow="Saved Report History"
+          title="Recent scheduled report runs"
+          description="Once daily, weekly, and monthly report jobs execute, this history gives Admin and Analysts a direct audit trail of what ran, who it targeted, and whether the delivery succeeded."
+          badge={`${reportHistory.length} runs visible`}
+        />
+        <div className="mt-6 grid gap-3">
+          {reportHistory.length > 0 ? (
+            reportHistory.map((run) => (
+              <article key={run.id} className="rounded-[22px] border border-[rgba(157,194,242,0.12)] bg-white/4 px-4 py-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-pondo-sky-300">
+                      {run.cadence.toUpperCase()} | {run.period.replaceAll("_", " ")} | {run.status.toUpperCase()}
+                    </div>
+                    <div className="mt-2 text-xl font-bold text-white">{run.subject}</div>
+                    <div className="mt-1 text-sm text-pondo-text-secondary">
+                      {run.recipients.join(", ")} | {new Date(run.createdAt).toLocaleString("en-ZA", { hour12: false })}
+                    </div>
+                    {run.errorMessage ? <div className="mt-2 text-sm text-red-300">Last error: {run.errorMessage}</div> : null}
+                  </div>
+                  <div className="text-right text-sm text-pondo-text-secondary">
+                    <div>{run.dashboardLabel}</div>
+                    <div>{run.completedAt ? new Date(run.completedAt).toLocaleString("en-ZA", { hour12: false }) : "Awaiting completion"}</div>
+                    {run.dashboardUrl ? (
+                      <a href={run.dashboardUrl} className="mt-2 inline-block text-pondo-sky-300 underline underline-offset-4">
+                        Open dashboard
+                      </a>
+                    ) : null}
+                  </div>
+                </div>
+              </article>
+            ))
+          ) : (
+            <div className="rounded-[22px] border border-[rgba(157,194,242,0.12)] bg-white/4 px-4 py-5 text-sm text-pondo-text-secondary">
+              No report runs have been recorded yet. The history table will start filling once cron jobs execute successfully.
+            </div>
+          )}
+        </div>
+      </section>
 
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard label="Schema Focus" value="pondo_core" hint="Real transaction, risk, payment, and review tables" />

@@ -1,6 +1,7 @@
 import { readFile } from "fs/promises";
 import path from "path";
 import type { AdminDashboardPeriod } from "@/types/admin";
+import { createReportRun, finishReportRun } from "./adminReportHistory";
 import { getAdminDashboard } from "./service";
 
 type ReportCadence = "daily" | "weekly" | "monthly";
@@ -105,12 +106,16 @@ async function loadSqlAttachments(files: string[]): Promise<EmailAttachment[]> {
   const attachments: EmailAttachment[] = [];
 
   for (const file of files) {
-    const content = await readFile(path.join(root, file), "utf8");
-    attachments.push({
-      filename: file,
-      content: Buffer.from(content, "utf8").toString("base64"),
-      contentType: "text/sql; charset=utf-8",
-    });
+    try {
+      const content = await readFile(path.join(root, file), "utf8");
+      attachments.push({
+        filename: file,
+        content: Buffer.from(content, "utf8").toString("base64"),
+        contentType: "text/sql; charset=utf-8",
+      });
+    } catch {
+      // Avoid failing the whole scheduled report when a source SQL file is not packaged.
+    }
   }
 
   return attachments;
@@ -163,6 +168,14 @@ export async function sendScheduledAdminReport(cadence: ReportCadence) {
   const dashboardUrl = getDashboardUrl(pack.dashboardPath);
   const attachments = await loadSqlAttachments(pack.scripts);
   const subject = `${pack.subjectPrefix} | ${dashboard.window.label} | ${new Date(dashboard.generatedAt).toLocaleDateString("en-ZA")}`;
+  const reportRunId = await createReportRun({
+    cadence,
+    period: pack.period,
+    subject,
+    recipients,
+    dashboardLabel: dashboard.window.label,
+    dashboardUrl,
+  });
 
   const html = `
     <div style="font-family:Arial,sans-serif;background:#f8fafc;padding:24px;color:#0f172a;">
@@ -217,19 +230,29 @@ export async function sendScheduledAdminReport(cadence: ReportCadence) {
       </div>
     </div>`;
 
-  const emailResult = await sendEmail({
-    to: recipients,
-    subject,
-    html,
-    attachments,
-  });
+  try {
+    const emailResult = await sendEmail({
+      to: recipients,
+      subject,
+      html,
+      attachments,
+    });
 
-  return {
-    cadence,
-    recipients,
-    subject,
-    attachedScripts: pack.scripts,
-    dashboardWindow: dashboard.window,
-    emailResult,
-  };
+    await finishReportRun(reportRunId, { status: "sent" });
+
+    return {
+      cadence,
+      recipients,
+      subject,
+      attachedScripts: pack.scripts,
+      dashboardWindow: dashboard.window,
+      emailResult,
+    };
+  } catch (error) {
+    await finishReportRun(reportRunId, {
+      status: "failed",
+      errorMessage: error instanceof Error ? error.message : "report_send_failed",
+    });
+    throw error;
+  }
 }

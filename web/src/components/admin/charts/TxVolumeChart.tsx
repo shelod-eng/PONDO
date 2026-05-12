@@ -1,7 +1,15 @@
 import { buildAreaPath, buildLinePath } from "@/components/admin/charts/chartUtils";
 import type { TxVolumePoint } from "@/types/admin";
 
-export function TxVolumeChart({ data }: { data: TxVolumePoint[] }) {
+export function TxVolumeChart({
+  data,
+  selectedLabel,
+  onSelectPoint,
+}: {
+  data: TxVolumePoint[];
+  selectedLabel?: string | null;
+  onSelectPoint?: (point: TxVolumePoint) => void;
+}) {
   const width = 760;
   const height = 250;
   const completed = data.map((point) => point.completed);
@@ -16,7 +24,7 @@ export function TxVolumeChart({ data }: { data: TxVolumePoint[] }) {
     <article className="admin-panel rounded-[30px] p-6 text-white">
       <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-pondo-sky-300">Analytics</div>
       <h3 className="admin-display mt-2 text-4xl font-semibold">Transaction Volume</h3>
-      <p className="mt-2 text-sm text-pondo-text-secondary">Completed vs failed vs pending checkouts today</p>
+      <p className="mt-2 text-sm text-pondo-text-secondary">Completed vs failed vs pending checkouts across the selected reporting period</p>
       <svg viewBox={`0 0 ${width} ${height}`} className="mt-6 w-full">
         <defs>
           <linearGradient id="tx-volume-fill" x1="0" y1="0" x2="0" y2="1">
@@ -31,8 +39,9 @@ export function TxVolumeChart({ data }: { data: TxVolumePoint[] }) {
         {data.map((point, index) => {
           const x = 60 + (640 * index) / Math.max(data.length - 1, 1);
           return (
-            <g key={point.hour}>
+            <g key={point.hour} className={onSelectPoint ? "cursor-pointer" : ""} onClick={() => onSelectPoint?.(point)}>
               <line x1={x} y1="28" x2={x} y2="220" stroke="rgba(157,194,242,0.12)" strokeDasharray="4 8" />
+              {selectedLabel === point.hour ? <circle cx={x} cy="20" r="6" fill="#f5b642" /> : null}
               <text x={x} y="238" textAnchor="middle" fontSize="12" fill="#cdd6e1">
                 {point.hour}
               </text>

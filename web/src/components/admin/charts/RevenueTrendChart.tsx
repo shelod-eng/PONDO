@@ -9,10 +9,14 @@ export function RevenueTrendChart({
   data,
   currentLabel,
   comparisonLabel,
+  selectedLabel,
+  onSelectPoint,
 }: {
   data: RevenueTrendPoint[];
   currentLabel: string;
   comparisonLabel: string;
+  selectedLabel?: string | null;
+  onSelectPoint?: (point: RevenueTrendPoint) => void;
 }) {
   const width = 760;
   const height = 250;
@@ -37,8 +41,9 @@ export function RevenueTrendChart({
         {data.map((point, index) => {
           const x = 70 + (630 * index) / Math.max(data.length - 1, 1);
           return (
-            <g key={point.label}>
+            <g key={point.label} className={onSelectPoint ? "cursor-pointer" : ""} onClick={() => onSelectPoint?.(point)}>
               <line x1={x} y1="30" x2={x} y2="220" stroke="rgba(157,194,242,0.12)" strokeDasharray="4 8" />
+              {selectedLabel === point.label ? <circle cx={x} cy="20" r="6" fill="#f5b642" /> : null}
               <text x={x} y="238" textAnchor="middle" fontSize="12" fill="#cdd6e1">
                 {point.label}
               </text>

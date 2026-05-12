@@ -114,6 +114,20 @@ export interface AdminReportAutomation {
   superAdminDigestSuggestion: string;
 }
 
+export interface AdminReportRun {
+  id: string;
+  cadence: "daily" | "weekly" | "monthly";
+  period: AdminDashboardPeriod;
+  subject: string;
+  recipients: string[];
+  status: "queued" | "sent" | "failed";
+  dashboardLabel: string;
+  dashboardUrl: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  errorMessage: string | null;
+}
+
 export interface AdminDashboardData {
   kpis: KpiMetric[];
   recentTransactions: CheckoutRecord[];
@@ -127,6 +141,7 @@ export interface AdminDashboardData {
   kycTrendData: KycTrendPoint[];
   revenueTrendData: RevenueTrendPoint[];
   partnerPerformanceData: PartnerPerformancePoint[];
+  reportHistory: AdminReportRun[];
   window: AdminDashboardWindow;
   automation: AdminReportAutomation;
   generatedAt: string;

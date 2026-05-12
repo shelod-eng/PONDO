@@ -16,6 +16,7 @@ import type {
   VerificationState,
 } from "@/types/admin";
 import { getPool } from "./db";
+import { getAdminReportHistory } from "./adminReportHistory";
 import { assessGeoRisk, deriveDeliveryLocation, lookupIpGeo, type ClientGeo, type ValidatedAddress } from "./risk";
 
 type PartnerName = "amazon" | "temu" | "takealot" | "woocommerce" | "shopify";
@@ -2119,7 +2120,7 @@ export async function getAdminDashboard(options?: { period?: AdminDashboardPerio
   const periodValues = [window.dateFrom, window.dateTo];
   const comparePeriodValues = [comparisonWindow.dateFrom, comparisonWindow.dateTo];
 
-  const [recentRows, kycRows, settlementRow, reviewRow, reviewQueueRows, orderStatusRows, txVolumeRows, kycTrendRows, partnerRows, revenueCurrentRows, revenueCompareRows] = await Promise.all([
+  const [recentRows, kycRows, settlementRow, reviewRow, reviewQueueRows, orderStatusRows, txVolumeRows, kycTrendRows, partnerRows, revenueCurrentRows, revenueCompareRows, reportHistory] = await Promise.all([
     getPool().query<{
       transaction_id: string;
       created_at: string;
@@ -2450,9 +2451,10 @@ export async function getAdminDashboard(options?: { period?: AdminDashboardPerio
        where coalesce(ps.settled_at, pt.reconciled_at, pt.created_at) >= $1
          and coalesce(ps.settled_at, pt.reconciled_at, pt.created_at) < $2
          and pt.status = 'reconciled'
-       order by coalesce(ps.settled_at, pt.reconciled_at, pt.created_at) asc`,
+      order by coalesce(ps.settled_at, pt.reconciled_at, pt.created_at) asc`,
       comparePeriodValues,
     ),
+    getAdminReportHistory(8),
   ]);
 
   const recentTransactions: CheckoutRecord[] = recentRows.rows.map((row) => ({
@@ -2737,6 +2739,7 @@ export async function getAdminDashboard(options?: { period?: AdminDashboardPerio
     kycTrendData,
     revenueTrendData,
     partnerPerformanceData,
+    reportHistory,
     window,
     automation: {
       refreshCadence: "Daily",

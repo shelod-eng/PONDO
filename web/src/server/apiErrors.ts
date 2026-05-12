@@ -30,6 +30,11 @@ const ERROR_MAP: Record<string, ApiErrorConfig> = {
     message: "Address validation is temporarily unavailable. You can continue with manual address entry.",
     retryable: true,
   },
+  admin_report_history_failed: {
+    status: 503,
+    message: "The admin report history could not be loaded right now.",
+    retryable: true,
+  },
   confirm_details_failed: {
     status: 503,
     message: "Checkout details could not be saved right now. Please try again.",
@@ -124,6 +129,11 @@ const ERROR_MAP: Record<string, ApiErrorConfig> = {
   resend_from_email_missing: {
     status: 503,
     message: "The reporting sender email is not configured yet.",
+  },
+  report_send_failed: {
+    status: 503,
+    message: "The scheduled report could not be sent right now.",
+    retryable: true,
   },
   risk_assessment_failed: {
     status: 503,

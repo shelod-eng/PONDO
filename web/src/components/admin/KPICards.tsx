@@ -1,12 +1,25 @@
 import type { KpiMetric } from "@/types/admin";
 
-export function KPICards({ metrics }: { metrics: KpiMetric[] }) {
+export function KPICards({
+  metrics,
+  selectedMetricId,
+  onSelectMetric,
+}: {
+  metrics: KpiMetric[];
+  selectedMetricId?: string | null;
+  onSelectMetric?: (metric: KpiMetric) => void;
+}) {
   return (
     <div className="grid gap-4 xl:grid-cols-4">
       {metrics.map((metric) => (
         <article
           key={metric.id}
-          className="admin-panel-soft rounded-[28px] p-6 text-white"
+          className={[
+            "admin-panel-soft rounded-[28px] p-6 text-white transition",
+            onSelectMetric ? "cursor-pointer hover:brightness-110" : "",
+            selectedMetricId === metric.id ? "ring-2 ring-[#f5b642]" : "",
+          ].join(" ")}
+          onClick={() => onSelectMetric?.(metric)}
           style={{
             backgroundImage: `linear-gradient(180deg, rgba(16,39,67,0.96) 0%, rgba(10,27,48,0.98) 100%), linear-gradient(135deg, ${metric.accent}22, transparent 58%)`,
           }}

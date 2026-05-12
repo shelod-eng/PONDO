@@ -31,7 +31,15 @@ function donutSegment(
   ].join(" ");
 }
 
-export function KYCPieChart({ data }: { data: KycPieSlice[] }) {
+export function KYCPieChart({
+  data,
+  selectedSlice,
+  onSelectSlice,
+}: {
+  data: KycPieSlice[];
+  selectedSlice?: string | null;
+  onSelectSlice?: (slice: KycPieSlice) => void;
+}) {
   const total = data.reduce((sum, item) => sum + item.value, 0);
   const segments = data.map((slice) => {
     const previous = data.slice(0, data.indexOf(slice)).reduce((sum, item) => sum + item.value, 0);
@@ -48,16 +56,36 @@ export function KYCPieChart({ data }: { data: KycPieSlice[] }) {
       <div className="flex flex-col items-center">
         <svg viewBox="0 0 260 220" className="mt-4 w-full max-w-[320px]">
           {segments.map((slice) => {
-            return <path key={slice.name} d={donutSegment(130, 100, 52, 84, slice.start, slice.end)} fill={slice.color} stroke="#0b1e38" strokeWidth="4" />;
+            return (
+              <path
+                key={slice.name}
+                d={donutSegment(130, 100, 52, 84, slice.start, slice.end)}
+                fill={slice.color}
+                stroke={selectedSlice === slice.name ? "#f5b642" : "#0b1e38"}
+                strokeWidth={selectedSlice === slice.name ? "6" : "4"}
+                className={onSelectSlice ? "cursor-pointer" : ""}
+                onClick={() => onSelectSlice?.(slice)}
+              />
+            );
           })}
           <circle cx="130" cy="100" r="34" fill="#0b1e38" />
         </svg>
         <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm">
           {data.map((slice) => (
-            <span key={slice.name} className="flex items-center gap-2" style={{ color: slice.color }}>
+            <button
+              key={slice.name}
+              type="button"
+              className={[
+                "flex items-center gap-2 rounded-full px-3 py-2 text-left",
+                onSelectSlice ? "cursor-pointer transition hover:bg-white/5" : "",
+                selectedSlice === slice.name ? "bg-white/7 ring-1 ring-[#f5b642]" : "",
+              ].join(" ")}
+              style={{ color: slice.color }}
+              onClick={() => onSelectSlice?.(slice)}
+            >
               <span className="h-3 w-3 rounded-full" style={{ backgroundColor: slice.color }} />
               {slice.name}
-            </span>
+            </button>
           ))}
         </div>
       </div>
