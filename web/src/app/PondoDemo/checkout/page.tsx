@@ -1879,8 +1879,8 @@ export default function PondoCheckoutPage() {
 
       {reviewAssistantOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4">
-          <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_24px_80px_rgba(15,23,42,0.28)]">
-            <div className="flex items-start justify-between gap-4">
+          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.28)]">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
               <div>
                 <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Demo Review Popup</div>
                 <h3 className="mt-2 text-2xl font-extrabold text-pondo-navy-900">AI Review Assistant</h3>
@@ -1897,80 +1897,81 @@ export default function PondoCheckoutPage() {
               </button>
             </div>
 
-            <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-900">
-              <div className="font-bold">Assistant recommendation</div>
-              <div className="mt-2">{reviewAssistant.summary}</div>
-            </div>
-
-            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-              <div className="text-sm font-bold text-pondo-navy-900">Review signals considered</div>
-              <div className="mt-3 space-y-2 text-sm text-slate-700">
-                {reviewAssistant.reasons.map((reason) => (
-                  <div key={reason} className="rounded-xl bg-white px-3 py-2">
-                    {reason}
-                  </div>
-                ))}
+            <div className="overflow-y-auto px-6 py-5">
+              <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-900">
+                <div className="font-bold">Assistant recommendation</div>
+                <div className="mt-2">{reviewAssistant.summary}</div>
               </div>
-            </div>
 
-            {documentAnalysis ? (
-              <div className="mt-5 grid gap-4 lg:grid-cols-2">
-                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                  <div className="text-sm font-bold text-pondo-navy-900">Identity extraction</div>
-                  <div className="mt-3 space-y-2 text-sm text-slate-700">
-                    {[
-                      ["ID number", documentAnalysis.identity.extracted.idNumber || "Not extracted"],
-                      ["Full name", documentAnalysis.identity.extracted.fullName || "Not extracted"],
-                      ["Date of birth", documentAnalysis.identity.extracted.birthDate || "Not extracted"],
-                      ["Gender", documentAnalysis.identity.extracted.gender || "Not extracted"],
-                      ["Citizenship", documentAnalysis.identity.extracted.citizenship || "Not extracted"],
-                    ].map(([label, value]) => (
-                      <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                        <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">{label}</div>
-                        <div className="mt-1 text-sm text-slate-800">{value}</div>
-                      </div>
-                    ))}
-                    <div className="text-xs text-slate-500">Source: {documentAnalysis.identity.source}</div>
-                  </div>
+              <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                <div className="text-sm font-bold text-pondo-navy-900">Review signals considered</div>
+                <div className="mt-3 grid gap-2 lg:grid-cols-2 text-sm text-slate-700">
+                  {reviewAssistant.reasons.map((reason) => (
+                    <div key={reason} className="rounded-xl bg-white px-3 py-2">
+                      {reason}
+                    </div>
+                  ))}
                 </div>
-                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                  <div className="text-sm font-bold text-pondo-navy-900">Address extraction</div>
-                  <div className="mt-3 space-y-2 text-sm text-slate-700">
-                    {[
-                      ["Account holder", documentAnalysis.proofOfAddress?.extracted.accountHolderName || "Not extracted"],
-                      ["Provider", documentAnalysis.proofOfAddress?.extracted.provider || "Not extracted"],
-                      ["Document type", documentAnalysis.proofOfAddress?.extracted.documentType || "Not extracted"],
-                      ["Invoice date", documentAnalysis.proofOfAddress?.extracted.invoiceDate || "Not extracted"],
-                      ["Address line 1", documentAnalysis.proofOfAddress?.extracted.addressLine1 || "Not extracted"],
-                      ["Suburb", documentAnalysis.proofOfAddress?.extracted.suburb || "Not extracted"],
-                      ["Municipality / area", documentAnalysis.proofOfAddress?.extracted.municipality || "Not extracted"],
-                      ["Postal code", documentAnalysis.proofOfAddress?.extracted.postalCode || "Not extracted"],
-                      [
-                        "Valid for review",
-                        documentAnalysis.proofOfAddress?.extracted.validForReview === null || documentAnalysis.proofOfAddress?.extracted.validForReview === undefined
-                          ? "Not determined"
-                          : documentAnalysis.proofOfAddress.extracted.validForReview
-                            ? "Yes"
-                            : "No",
-                      ],
-                      ["Document age (days)", documentAnalysis.proofOfAddress?.extracted.documentAgeDays?.toString() || "Not extracted"],
-                      ["Confidence score", documentAnalysis.proofOfAddress?.extracted.confidenceScore?.toString() || "Not extracted"],
-                      [
-                        "Full extracted address",
+              </div>
+
+              {documentAnalysis ? (
+                <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                    <div className="text-sm font-bold text-pondo-navy-900">Identity extraction</div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2 text-sm text-slate-700">
+                      {[
+                        ["ID number", documentAnalysis.identity.extracted.idNumber || "Not extracted"],
+                        ["Full name", documentAnalysis.identity.extracted.fullName || "Not extracted"],
+                        ["Date of birth", documentAnalysis.identity.extracted.birthDate || "Not extracted"],
+                        ["Gender", documentAnalysis.identity.extracted.gender || "Not extracted"],
+                        ["Citizenship", documentAnalysis.identity.extracted.citizenship || "Not extracted"],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                          <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">{label}</div>
+                          <div className="mt-1 text-sm text-slate-800">{value}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 text-xs text-slate-500">Source: {documentAnalysis.identity.source}</div>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                    <div className="text-sm font-bold text-pondo-navy-900">Address extraction</div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2 text-sm text-slate-700">
+                      {[
+                        ["Account holder", documentAnalysis.proofOfAddress?.extracted.accountHolderName || "Not extracted"],
+                        ["Document type", documentAnalysis.proofOfAddress?.extracted.documentType || "Not extracted"],
+                        ["Invoice date", documentAnalysis.proofOfAddress?.extracted.invoiceDate || "Not extracted"],
+                        ["Address line 1", documentAnalysis.proofOfAddress?.extracted.addressLine1 || "Not extracted"],
+                        ["Suburb", documentAnalysis.proofOfAddress?.extracted.suburb || "Not extracted"],
+                        ["Municipality / area", documentAnalysis.proofOfAddress?.extracted.municipality || "Not extracted"],
+                        ["Postal code", documentAnalysis.proofOfAddress?.extracted.postalCode || "Not extracted"],
                         [
-                          documentAnalysis.proofOfAddress?.extracted.addressLine1,
-                          documentAnalysis.proofOfAddress?.extracted.suburb,
-                          documentAnalysis.proofOfAddress?.extracted.municipality,
-                          documentAnalysis.proofOfAddress?.extracted.postalCode,
-                        ].filter(Boolean).join(", ") || "Not extracted",
-                      ],
-                    ].map(([label, value]) => (
-                      <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                        <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">{label}</div>
-                        <div className="mt-1 text-sm text-slate-800">{value}</div>
-                      </div>
-                    ))}
-                    <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                          "Valid for review",
+                          documentAnalysis.proofOfAddress?.extracted.validForReview === null || documentAnalysis.proofOfAddress?.extracted.validForReview === undefined
+                            ? "Not determined"
+                            : documentAnalysis.proofOfAddress.extracted.validForReview
+                              ? "Yes"
+                              : "No",
+                        ],
+                        ["Document age (days)", documentAnalysis.proofOfAddress?.extracted.documentAgeDays?.toString() || "Not extracted"],
+                        ["Confidence score", documentAnalysis.proofOfAddress?.extracted.confidenceScore?.toString() || "Not extracted"],
+                        [
+                          "Full extracted address",
+                          [
+                            documentAnalysis.proofOfAddress?.extracted.addressLine1,
+                            documentAnalysis.proofOfAddress?.extracted.suburb,
+                            documentAnalysis.proofOfAddress?.extracted.municipality,
+                            documentAnalysis.proofOfAddress?.extracted.postalCode,
+                          ].filter(Boolean).join(", ") || "Not extracted",
+                        ],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                          <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">{label}</div>
+                          <div className="mt-1 text-sm text-slate-800">{value}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
                       <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">SAPS zone check</div>
                       <div className="mt-1 text-sm text-slate-800">
                         {documentAnalysis.comparisons.sapsAreaMatch
@@ -1978,13 +1979,14 @@ export default function PondoCheckoutPage() {
                           : "No direct match"}
                       </div>
                     </div>
-                    <div className="text-xs text-slate-500">Source: {documentAnalysis.proofOfAddress?.source || "unavailable"}</div>
+                    <div className="mt-3 text-xs text-slate-500">Source: {documentAnalysis.proofOfAddress?.source || "unavailable"}</div>
                   </div>
                 </div>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
 
-            <div className="mt-5 flex flex-wrap gap-3">
+            <div className="border-t border-slate-200 px-6 py-5">
+              <div className="flex flex-wrap gap-3">
               <button
                 onClick={async () => {
                   await onResolveManualReview("approved");
@@ -2005,6 +2007,7 @@ export default function PondoCheckoutPage() {
               >
                 {busy ? "Updating review..." : "Decline Review"}
               </button>
+              </div>
             </div>
           </div>
         </div>

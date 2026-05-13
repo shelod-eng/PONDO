@@ -115,7 +115,6 @@ export type DocumentAnalysisResult = {
       suburb: string | null;
       municipality: string | null;
       postalCode: string | null;
-      provider: string | null;
       invoiceDate: string | null;
       documentType: string | null;
       validForReview: boolean | null;

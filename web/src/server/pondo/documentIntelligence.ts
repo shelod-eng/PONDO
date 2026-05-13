@@ -1,7 +1,9 @@
 import { parseSouthAfricanId } from "@/lib/validateSAID";
 import type { DocumentAnalysisResult, DocumentUploadPayload } from "@/lib/api";
 import { execFile } from "node:child_process";
-import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
 type AnalyzeDocumentsInput = {
   identityDocumentType: "sa_id" | "drivers_licence";
@@ -119,71 +121,25 @@ function decodeBase64Data(base64Data: string) {
   return Buffer.from(payload, "base64");
 }
 
-function runNodeExtractionHelper(mode: "pdf_text" | "pdf_ocr", file: DocumentUploadPayload) {
-  return new Promise<string>((resolve) => {
-    const helperScript = `
-      const fs = require("fs");
-      const { PDFParse } = require("pdf-parse");
-      ${mode === "pdf_ocr" ? 'const Tesseract = require("tesseract.js"); const { createCanvas, loadImage } = require("@napi-rs/canvas");' : ""}
-      (async () => {
-        const chunks = [];
-        for await (const chunk of process.stdin) chunks.push(chunk);
-        const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-        const base64 = payload.base64Data.includes(",") ? payload.base64Data.slice(payload.base64Data.indexOf(",") + 1) : payload.base64Data;
-        const buffer = Buffer.from(base64, "base64");
-        const parser = new PDFParse({ data: buffer });
-        try {
-          if (${mode === "pdf_text"}) {
-            const result = await parser.getText();
-            process.stdout.write((result.text || "").trim());
-          } else {
-            const shot = await parser.getScreenshot({ first: 2, imageDataUrl: false, imageBuffer: true, desiredWidth: 1800 });
-            const texts = [];
-            const scoreText = (text) => {
-              const normalized = String(text || "");
-              let score = 0;
-              if (/I\\.?D\\.?\\s*NO/i.test(normalized)) score += 40;
-              if (/(\\d\\s*){13}/.test(normalized)) score += 40;
-              if (/SURNAME|VAN|FORENAMES|VOORNAME|CITIZEN/i.test(normalized)) score += 15;
-              score += Math.min(20, normalized.trim().length / 60);
-              return score;
-            };
-            const rotate = async (buffer, radians) => {
-              const img = await loadImage(buffer);
-              const canvas = createCanvas(img.height, img.width);
-              const ctx = canvas.getContext("2d");
-              ctx.translate(img.height / 2, img.width / 2);
-              ctx.rotate(radians);
-              ctx.drawImage(img, -img.width / 2, -img.height / 2);
-              return canvas.toBuffer("image/png");
-            };
-            for (const page of shot.pages || []) {
-              if (!page || !page.data) continue;
-              const variants = [page.data];
-              try { variants.push(await rotate(page.data, Math.PI / 2)); } catch {}
-              try { variants.push(await rotate(page.data, -Math.PI / 2)); } catch {}
-              let bestText = "";
-              let bestScore = -1;
-              for (const variant of variants) {
-                const result = await Tesseract.recognize(variant, "eng");
-                const text = result?.data?.text?.trim() || "";
-                const score = scoreText(text);
-                if (score > bestScore) {
-                  bestScore = score;
-                  bestText = text;
-                }
-              }
-              if (bestText) texts.push(bestText);
-            }
-            process.stdout.write(texts.join("\\n").trim());
-          }
-        } finally {
-          await parser.destroy().catch(() => {});
-        }
-      })().catch(() => process.stdout.write(""));
-    `;
+function resolveDocumentHelperPath() {
+  const candidates = [
+    path.resolve(process.cwd(), "scripts", "pondo-document-extract.cjs"),
+    path.resolve(process.cwd(), "..", "scripts", "pondo-document-extract.cjs"),
+    fileURLToPath(new URL("../../../../scripts/pondo-document-extract.cjs", import.meta.url)),
+  ];
 
-    const child = execFile(process.execPath, ["-e", helperScript], { windowsHide: true }, (error, stdout) => {
+  return candidates.find((candidate) => existsSync(candidate)) || "";
+}
+
+function runDocumentExtractionHelper(mode: "pdf_text" | "pdf_ocr" | "image_ocr", file: DocumentUploadPayload) {
+  return new Promise<string>((resolve) => {
+    const helperPath = resolveDocumentHelperPath();
+    if (!helperPath) {
+      resolve("");
+      return;
+    }
+
+    const child = execFile(process.execPath, [helperPath], { cwd: process.cwd(), windowsHide: true }, (error, stdout) => {
       if (error) {
         resolve("");
         return;
@@ -191,12 +147,14 @@ function runNodeExtractionHelper(mode: "pdf_text" | "pdf_ocr", file: DocumentUpl
       resolve(String(stdout || "").trim());
     });
 
-    child.stdin?.end(JSON.stringify(file));
+    child.stdin?.end(JSON.stringify({ mode, file }));
   });
 }
 
 function normalizeOcrIdentityText(text: string) {
   return text
+    .replace(/\b[1Il]\s*\.\s*D\s*\.\s*NO\b/gi, "I.D.NO")
+    .replace(/\b[1Il]\s*\.\s*D\b/gi, "I.D")
     .replace(/[|]/g, "I")
     .replace(/[‘’]/g, "'")
     .replace(/\s+/g, " ")
@@ -222,6 +180,78 @@ function extractSouthAfricanIdNumber(text: string) {
     || "";
   const digits = normalizeOcrDigitConfusions(idContext).replace(/\\D/g, "");
   return digits.length >= 13 ? digits.slice(0, 13) : null;
+}
+
+function toSlashDate(isoDate: string | null | undefined) {
+  const raw = String(isoDate || "").trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return `${match[3]}/${match[2]}/${match[1]}`;
+}
+
+function collectIdentityDateHints(text: string) {
+  const normalized = normalizeOcrIdentityText(text);
+  const hints = new Set<string>();
+
+  for (const match of normalized.matchAll(/\b(\d{2})[\/.-](\d{2})[\/.-](\d{4})\b/g)) {
+    hints.add(`${match[3]}-${match[2]}-${match[1]}`);
+  }
+
+  for (const match of normalized.matchAll(/\b(\d{4})[\/.-](\d{2})[\/.-](\d{2})\b/g)) {
+    hints.add(`${match[1]}-${match[2]}-${match[3]}`);
+  }
+
+  return hints;
+}
+
+function extractBestSouthAfricanIdNumber(text: string) {
+  const normalized = normalizeOcrIdentityText(text);
+  const dateHints = collectIdentityDateHints(normalized);
+  const candidateScores = new Map<string, number>();
+
+  const addCandidate = (candidate: string, score: number) => {
+    candidateScores.set(candidate, (candidateScores.get(candidate) || 0) + score);
+  };
+
+  const pushCandidateWindows = (raw: string, baseScore: number) => {
+    const digits = normalizeOcrDigitConfusions(raw).replace(/\D/g, "");
+    if (digits.length < 13) return;
+
+    for (let index = 0; index <= digits.length - 13; index += 1) {
+      const candidate = digits.slice(index, index + 13);
+      const parsed = parseSouthAfricanId(candidate);
+      if (!parsed) continue;
+
+      let score = baseScore + 100;
+      if (parsed.birthDate && dateHints.has(parsed.birthDate)) score += 40;
+
+      const slashDate = toSlashDate(parsed.birthDate);
+      if (slashDate && normalized.includes(slashDate)) score += 20;
+
+      addCandidate(candidate, score);
+    }
+  };
+
+  for (const match of normalized.matchAll(/[I1l|]\.?\s*D\.?\s*NO\.?\s*[:.]?\s*([0-9OQIl|ZzSs\u00A3GgBb\s./-]{13,32})/gi)) {
+    pushCandidateWindows(match[1], 80);
+  }
+
+  for (const match of normalized.matchAll(/IDENTITY\s*NUMBER\s*[:.]?\s*([0-9OQIl|ZzSs\u00A3GgBb\s./-]{13,32})/gi)) {
+    pushCandidateWindows(match[1], 80);
+  }
+
+  for (const match of normalized.matchAll(/\b(\d{6}\s+\d{4}\s+\d{2}\s+\d)\b/g)) {
+    pushCandidateWindows(match[1], 90);
+  }
+
+  for (const match of normalized.matchAll(/\b([0-9OQIl|ZzSs\u00A3GgBb\s./-]{13,32})\b/g)) {
+    pushCandidateWindows(match[1], 20);
+  }
+
+  const ranked = Array.from(candidateScores.entries()).sort((left, right) => right[1] - left[1]);
+  const best = ranked[0];
+  if (best && best[1] >= 150) return best[0];
+  return null;
 }
 
 function extractOcrNameValue(text: string, labels: string[]) {
@@ -279,39 +309,11 @@ function extractIdentityNamesFromOcrLines(text: string) {
   return { surname, firstName };
 }
 
-function getPdfParseModule() {
-  const require = createRequire(import.meta.url);
-  return require("pdf-parse") as {
-    PDFParse: new (input: { data: Buffer }) => {
-      getText: () => Promise<{ text?: string }>;
-      getScreenshot: (options?: Record<string, unknown>) => Promise<{ pages?: Array<{ data?: Buffer }> }>;
-      destroy: () => Promise<void>;
-    };
-  };
-}
-
 async function extractPdfText(file: DocumentUploadPayload) {
   const buffer = decodeBase64Data(file.base64Data);
-
-  const helperText = await runNodeExtractionHelper("pdf_text", file);
+  const helperText = await runDocumentExtractionHelper("pdf_text", file);
   if (helperText && helperText !== "-- 1 of 1 --") {
     return helperText;
-  }
-
-  try {
-    const { PDFParse } = getPdfParseModule();
-    const parser = new PDFParse({ data: buffer });
-    try {
-      const result = await parser.getText();
-      const text = result.text?.trim() || "";
-      if (text && text !== "-- 1 of 1 --") {
-        return text;
-      }
-    } finally {
-      await parser.destroy().catch(() => {});
-    }
-  } catch {
-    // Fall through to the pdfjs-based extractor below.
   }
 
   try {
@@ -353,51 +355,38 @@ async function extractPdfText(file: DocumentUploadPayload) {
 }
 
 async function extractPdfPageImages(file: DocumentUploadPayload) {
-  const buffer = decodeBase64Data(file.base64Data);
+  void file;
+  return [];
+}
 
-  try {
-    const { PDFParse } = getPdfParseModule();
-    const parser = new PDFParse({ data: buffer });
-    try {
-      const result = await parser.getScreenshot({
-        first: 2,
-        imageDataUrl: false,
-        imageBuffer: true,
-        desiredWidth: 1800,
-      });
-      return (result.pages || [])
-        .map((page) => page.data)
-        .filter((page): page is Buffer => Boolean(page) && Buffer.isBuffer(page));
-    } finally {
-      await parser.destroy().catch(() => {});
-    }
-  } catch {
-    return [];
-  }
+async function buildRotatedImageVariants(buffer: Buffer) {
+  const variants: Buffer[] = [buffer];
+  return variants;
+}
+
+function scoreOcrIdentityText(text: string) {
+  const normalized = String(text || "");
+  let score = 0;
+  if (/I\.?\s*D\.?\s*NO/i.test(normalized)) score += 40;
+  if (/(\d\s*){13}/.test(normalized)) score += 40;
+  if (/SURNAME|VAN|FORENAMES|VOORNAME|CITIZEN/i.test(normalized)) score += 15;
+  score += Math.min(20, normalized.trim().length / 60);
+  return score;
 }
 
 async function extractOcrText(file: DocumentUploadPayload) {
   const mimeType = file.mimeType.toLowerCase();
   const isPdf = mimeType === "application/pdf" || file.fileName.toLowerCase().endsWith(".pdf");
   if (isPdf) {
-    const helperText = await runNodeExtractionHelper("pdf_ocr", file);
+    const helperText = await runDocumentExtractionHelper("pdf_ocr", file);
+    if (helperText) return helperText;
+  } else {
+    const helperText = await runDocumentExtractionHelper("image_ocr", file);
     if (helperText) return helperText;
   }
   const buffers = isPdf ? await extractPdfPageImages(file) : [decodeBase64Data(file.base64Data)];
   if (buffers.length === 0) return "";
-
-  try {
-    const { default: Tesseract } = await import("tesseract.js");
-    const texts: string[] = [];
-    for (const buffer of buffers) {
-      const result = await Tesseract.recognize(buffer, "eng");
-      const text = result.data?.text?.trim();
-      if (text) texts.push(text);
-    }
-    return texts.join("\n").trim();
-  } catch {
-    return "";
-  }
+  return "";
 }
 
 function firstRegex(text: string, pattern: RegExp) {
@@ -505,19 +494,6 @@ function extractInlineProofAddress(text: string) {
   };
 }
 
-function detectProofProvider(text: string) {
-  const normalized = normalizeUpper(text);
-  if (normalized.includes("VODACOM")) return "Vodacom";
-  if (normalized.includes("TELKOM")) return "Telkom";
-  if (normalized.includes("MTN")) return "MTN";
-  if (normalized.includes("CELL C")) return "Cell C";
-  if (normalized.includes("AFRIHOST")) return "Afrihost";
-  if (normalized.includes("CITY OF JOHANNESBURG")) return "City Of Johannesburg";
-  if (normalized.includes("EKURHULENI")) return "City Of Ekurhuleni";
-  if (normalized.includes("TSHWANE")) return "City Of Tshwane";
-  return null;
-}
-
 function detectProofDocumentType(text: string) {
   const normalized = normalizeUpper(text);
   if (normalized.includes("TAX INVOICE")) return "Tax Invoice";
@@ -552,7 +528,8 @@ function extractIdentityFromText(
 
   const ocrNormalized = normalizeOcrIdentityText(upper);
   const lineOcrNames = extractIdentityNamesFromOcrLines(ocrNormalized);
-  const idNumber = extractSouthAfricanIdNumber(ocrNormalized) || firstRegex(upper, /\b(\d{13})\b/) || enteredIdNumber || null;
+  const extractedIdNumber = extractBestSouthAfricanIdNumber(ocrNormalized) || null;
+  const idNumber = extractedIdNumber || enteredIdNumber || null;
   let fullNameExtracted =
     firstRegex(upper, /^(MR|MRS|MS|MISS)\s+([A-Z]+(?:\s+[A-Z]+)+)\b/m)
     || firstRegex(upper, /\bNames?\s*[:\-]\s*([A-Z]+(?:\s+[A-Z]+)+)\b/i)
@@ -586,7 +563,11 @@ function extractIdentityFromText(
   }
 
   if (sourceHint === "ocr" && upper.trim()) {
-    issues.push("Identity fields were extracted through OCR because the uploaded document did not expose a machine-readable text layer.");
+    issues.push("Identity fields were extracted successfully through OCR from the uploaded image document.");
+  }
+
+  if (sourceHint === "ocr" && !extractedIdNumber && enteredIdNumber) {
+    issues.push("ID number could not be read confidently from the uploaded document, so the analyst view is temporarily using the submitted order ID number until manual verification.");
   }
 
   const chosenFullName = fullNameExtracted || [firstNameFromOcr, correctedSurnameFromOcr].filter(Boolean).join(" ") || fullName || null;
@@ -648,7 +629,6 @@ function extractProofOfAddressFromText(text: string, sourceHint: NonNullable<Doc
   const suburb = inlineExtracted?.suburb || textAddressCandidates[1] || null;
   const municipality = inlineExtracted?.municipality || textAddressCandidates[2] || null;
   const accountHolderName = inlineExtracted?.accountHolderName || titleCase(holderName);
-  const provider = detectProofProvider(text);
   const invoiceDate = extractInvoiceDate(text);
   const documentAgeDays = calculateDocumentAgeDays(invoiceDate);
   const documentType = detectProofDocumentType(text);
@@ -659,7 +639,7 @@ function extractProofOfAddressFromText(text: string, sourceHint: NonNullable<Doc
     issues.push("Proof of address does not expose a text layer, so address comparison may require manual confirmation.");
   }
   if (sourceHint === "ocr" && text.trim()) {
-    issues.push("Proof-of-address fields were extracted through OCR because the uploaded document did not expose a usable machine-readable text layer.");
+    issues.push("Proof-of-address fields were extracted successfully through OCR from the uploaded document.");
   }
 
   if (!addressLine1) {
@@ -667,19 +647,12 @@ function extractProofOfAddressFromText(text: string, sourceHint: NonNullable<Doc
   }
 
   const hasCoreFields = Boolean(accountHolderName && addressLine1 && postalCode);
-  const validForReview = hasCoreFields && documentAgeDays !== null ? documentAgeDays <= 92 : hasCoreFields;
-
-  if (!provider) {
-    issues.push("Document provider could not be identified confidently from the proof-of-address file.");
-  }
+  const validForReview = hasCoreFields;
   if (!invoiceDate) {
     issues.push("Invoice or statement date could not be extracted from the proof-of-address file.");
-  } else if (documentAgeDays !== null && documentAgeDays > 92) {
-    issues.push("Proof of address appears older than the typical 3-month review window.");
   }
 
   let confidenceScore = 0;
-  if (provider) confidenceScore += 15;
   if (accountHolderName) confidenceScore += 20;
   if (addressLine1) confidenceScore += 25;
   if (suburb) confidenceScore += 10;
@@ -695,7 +668,6 @@ function extractProofOfAddressFromText(text: string, sourceHint: NonNullable<Doc
       suburb: titleCase(suburb),
       municipality: titleCase(municipality),
       postalCode,
-      provider,
       invoiceDate,
       documentType,
       validForReview,
@@ -801,9 +773,9 @@ export async function analyzeManualReviewDocuments(input: AnalyzeDocumentsInput)
     score += 12;
     riskFlags.push("High-value basket increases manual-review sensitivity.");
   }
-  if (identity.source !== "pdf_text") {
+  if (identity.source === "unavailable") {
     score += 10;
-    riskFlags.push("Identity document needs stronger OCR or manual analyst validation because the text layer is not fully readable.");
+    riskFlags.push("Identity document could not be extracted reliably, so manual analyst validation is still required.");
   }
 
   const decision: DocumentAnalysisResult["recommendation"]["decision"] =

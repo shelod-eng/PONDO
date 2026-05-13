@@ -247,7 +247,6 @@ export default function ConfirmationPage() {
                   <div className="mt-3 space-y-2 text-sm text-slate-700">
                     {[
                       ["Account holder", documentAnalysis.proofOfAddress?.extracted.accountHolderName || "Not extracted"],
-                      ["Provider", documentAnalysis.proofOfAddress?.extracted.provider || "Not extracted"],
                       ["Document type", documentAnalysis.proofOfAddress?.extracted.documentType || "Not extracted"],
                       ["Invoice date", documentAnalysis.proofOfAddress?.extracted.invoiceDate || "Not extracted"],
                       ["Address line 1", documentAnalysis.proofOfAddress?.extracted.addressLine1 || "Not extracted"],
