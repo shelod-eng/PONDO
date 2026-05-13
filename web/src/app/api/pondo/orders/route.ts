@@ -25,6 +25,15 @@ const schema = z.object({
   riskContext: z.object({
     idNumber: z.string().trim().optional(),
     deviceFingerprint: z.string().trim().optional(),
+    documentContext: z.object({
+      identityDocumentType: z.enum(["sa_id", "drivers_licence"]).optional(),
+      identityDocumentUploaded: z.boolean().optional(),
+      identityDocumentFileName: z.string().trim().optional(),
+      proofOfAddressRequired: z.boolean().optional(),
+      proofOfAddressUploaded: z.boolean().optional(),
+      proofOfAddressFileName: z.string().trim().optional(),
+      documentAnalysis: z.record(z.string(), z.unknown()).nullable().optional(),
+    }).optional(),
     clientGeo: z.object({
       ip: z.string().trim().optional(),
       city: z.string().trim().optional(),

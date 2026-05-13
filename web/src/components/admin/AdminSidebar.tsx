@@ -1,14 +1,22 @@
-import type { AdminUser } from "@/types/admin";
+import type { AdminSection, AdminUser } from "@/types/admin";
 
 const navItems = [
-  { href: "#overview", label: "Overview", code: "OV" },
-  { href: "#checkouts", label: "Checkouts", code: "TX" },
-  { href: "#kyc", label: "KYC / ITC / Vetting", code: "KY" },
-  { href: "#drivers", label: "Driver Assignments", code: "DR" },
-  { href: "#analytics", label: "Analytics", code: "AN" },
+  { id: "overview_kpis" as AdminSection, label: "Overview KPIs", code: "OV" },
+  { id: "checkout_transactions" as AdminSection, label: "Checkout Transactions", code: "TX" },
+  { id: "manual_review_queue" as AdminSection, label: "Manual Review Queue", code: "MR" },
+  { id: "risk_kyc_vetting" as AdminSection, label: "Risk / KYC / Vetting", code: "KY" },
+  { id: "power_bi_extracts" as AdminSection, label: "Power BI Extracts", code: "BI" },
 ];
 
-export function AdminSidebar({ admin }: { admin: AdminUser }) {
+export function AdminSidebar({
+  admin,
+  activeSection,
+  onSelectSection,
+}: {
+  admin: AdminUser;
+  activeSection: AdminSection;
+  onSelectSection: (section: AdminSection) => void;
+}) {
   return (
     <aside className="border-r border-[rgba(45,78,116,0.7)] bg-[rgba(7,20,38,0.55)] backdrop-blur">
       <div className="flex h-full flex-col px-5 py-6 sm:px-7">
@@ -22,13 +30,14 @@ export function AdminSidebar({ admin }: { admin: AdminUser }) {
 
         <div className="mt-8 text-xs font-black uppercase tracking-[0.24em] text-pondo-sky-300/80">Navigation</div>
         <nav className="mt-4 space-y-2">
-          {navItems.map((item, index) => (
-            <a
+          {navItems.map((item) => (
+            <button
+              type="button"
               key={item.label}
-              href={item.href}
+              onClick={() => onSelectSection(item.id)}
               className={[
-                "group flex items-center gap-3 rounded-2xl border px-4 py-4 text-base font-semibold transition",
-                index === 0
+                "group flex w-full items-center gap-3 rounded-2xl border px-4 py-4 text-left text-base font-semibold transition",
+                activeSection === item.id
                   ? "border-[rgba(245,182,66,0.32)] bg-[linear-gradient(135deg,rgba(214,69,52,0.24),rgba(78,125,200,0.18))] text-white shadow-[0_18px_30px_rgba(3,10,24,0.2)]"
                   : "border-[rgba(157,194,242,0.08)] bg-white/4 text-pondo-text-secondary hover:bg-white/7 hover:text-white",
               ].join(" ")}
@@ -37,7 +46,7 @@ export function AdminSidebar({ admin }: { admin: AdminUser }) {
                 {item.code}
               </span>
               {item.label}
-            </a>
+            </button>
           ))}
         </nav>
 

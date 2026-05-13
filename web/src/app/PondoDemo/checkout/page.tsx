@@ -1164,6 +1164,17 @@ export default function PondoCheckoutPage() {
           });
         }
         setDocumentAnalysis(latestDocumentAnalysis);
+        log(`Document analysis sources - ID: ${latestDocumentAnalysis.identity.source}; Proof: ${latestDocumentAnalysis.proofOfAddress?.source || "unavailable"}`);
+        log(
+          `Document analysis extracted - Proof address: ${
+            [
+              latestDocumentAnalysis.proofOfAddress?.extracted.addressLine1,
+              latestDocumentAnalysis.proofOfAddress?.extracted.suburb,
+              latestDocumentAnalysis.proofOfAddress?.extracted.municipality,
+              latestDocumentAnalysis.proofOfAddress?.extracted.postalCode,
+            ].filter(Boolean).join(", ") || "Not extracted"
+          }`,
+        );
         setProcessingMessage("Document analysis complete. Writing the order to Supabase...");
       }
 
@@ -1927,10 +1938,23 @@ export default function PondoCheckoutPage() {
                   <div className="mt-3 space-y-2 text-sm text-slate-700">
                     {[
                       ["Account holder", documentAnalysis.proofOfAddress?.extracted.accountHolderName || "Not extracted"],
+                      ["Provider", documentAnalysis.proofOfAddress?.extracted.provider || "Not extracted"],
+                      ["Document type", documentAnalysis.proofOfAddress?.extracted.documentType || "Not extracted"],
+                      ["Invoice date", documentAnalysis.proofOfAddress?.extracted.invoiceDate || "Not extracted"],
                       ["Address line 1", documentAnalysis.proofOfAddress?.extracted.addressLine1 || "Not extracted"],
                       ["Suburb", documentAnalysis.proofOfAddress?.extracted.suburb || "Not extracted"],
                       ["Municipality / area", documentAnalysis.proofOfAddress?.extracted.municipality || "Not extracted"],
                       ["Postal code", documentAnalysis.proofOfAddress?.extracted.postalCode || "Not extracted"],
+                      [
+                        "Valid for review",
+                        documentAnalysis.proofOfAddress?.extracted.validForReview === null || documentAnalysis.proofOfAddress?.extracted.validForReview === undefined
+                          ? "Not determined"
+                          : documentAnalysis.proofOfAddress.extracted.validForReview
+                            ? "Yes"
+                            : "No",
+                      ],
+                      ["Document age (days)", documentAnalysis.proofOfAddress?.extracted.documentAgeDays?.toString() || "Not extracted"],
+                      ["Confidence score", documentAnalysis.proofOfAddress?.extracted.confidenceScore?.toString() || "Not extracted"],
                       [
                         "Full extracted address",
                         [

@@ -53,29 +53,25 @@ export function AdminHeader({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {admins.map((admin) => {
-            const active = admin.id === selectedAdminId;
-            return (
-              <button
-                key={admin.id}
-                onClick={() => onSelectAdmin(admin.id)}
-                className={[
-                  "flex min-w-[180px] items-center gap-3 rounded-2xl border px-5 py-3 text-left transition",
-                  active
-                    ? "border-[#f5b642] bg-[linear-gradient(135deg,rgba(234,106,63,0.18),rgba(78,125,200,0.16))] text-white admin-glow"
-                    : "border-[rgba(157,194,242,0.12)] bg-white/5 text-slate-100 hover:bg-white/8",
-                ].join(" ")}
+          <div className="flex min-w-[320px] items-center gap-3 rounded-2xl border border-[rgba(157,194,242,0.12)] bg-white/5 px-4 py-3 text-white">
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[rgba(6,21,42,0.95)] text-sm font-black text-white">
+              {admins.find((admin) => admin.id === selectedAdminId)?.avatar || "AD"}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-pondo-sky-300">User Access</div>
+              <select
+                value={selectedAdminId}
+                onChange={(e) => onSelectAdmin(e.target.value)}
+                className="mt-1 w-full bg-transparent text-sm font-bold text-white outline-none"
               >
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[rgba(6,21,42,0.95)] text-sm font-black text-white">
-                  {admin.avatar}
-                </span>
-                <span>
-                  <span className="block text-base font-bold">{admin.name.split(" ")[0]}</span>
-                  <span className="block text-xs text-pondo-sky-300">{admin.subtitle}</span>
-                </span>
-              </button>
-            );
-          })}
+                {admins.map((admin) => (
+                  <option key={admin.id} value={admin.id} className="bg-slate-950 text-white">
+                    {admin.name} | {admin.subtitle}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
 
           <div className="rounded-full bg-[linear-gradient(135deg,var(--pondo-orange-400),var(--pondo-orange-500))] px-5 py-3 text-sm font-bold text-white shadow-[0_14px_24px_rgba(214,69,52,0.24)]">
             Proposal Aligned

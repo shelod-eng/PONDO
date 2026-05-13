@@ -94,7 +94,7 @@ export type DocumentUploadPayload = {
 export type DocumentAnalysisResult = {
   identity: {
     documentType: "sa_id" | "drivers_licence";
-    source: "pdf_text" | "derived_from_form" | "demo_filename" | "unavailable";
+    source: "pdf_text" | "ocr" | "derived_from_form" | "demo_filename" | "unavailable";
     extracted: {
       idNumber: string | null;
       fullName: string | null;
@@ -108,7 +108,7 @@ export type DocumentAnalysisResult = {
     issues: string[];
   };
   proofOfAddress: {
-    source: "pdf_text" | "derived_from_form" | "demo_filename" | "unavailable";
+    source: "pdf_text" | "ocr" | "derived_from_form" | "demo_filename" | "unavailable";
     extracted: {
       accountHolderName: string | null;
       addressLine1: string | null;
@@ -116,6 +116,11 @@ export type DocumentAnalysisResult = {
       municipality: string | null;
       postalCode: string | null;
       provider: string | null;
+      invoiceDate: string | null;
+      documentType: string | null;
+      validForReview: boolean | null;
+      documentAgeDays: number | null;
+      confidenceScore: number | null;
     };
     issues: string[];
   } | null;

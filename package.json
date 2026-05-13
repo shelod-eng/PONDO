@@ -18,5 +18,11 @@
   "workspaces": [
     "api",
     "web"
-  ]
+  ],
+  "dependencies": {
+    "@zxing/library": "^0.23.0",
+    "formidable": "^3.5.4",
+    "openai": "^6.37.0",
+    "pdf-parse": "^2.4.5"
+  }
 }
