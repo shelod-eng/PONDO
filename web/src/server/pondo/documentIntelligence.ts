@@ -1,7 +1,7 @@
 import { parseSouthAfricanId } from "@/lib/validateSAID";
 import type { DocumentAnalysisResult, DocumentUploadPayload } from "@/lib/api";
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -122,10 +122,27 @@ function decodeBase64Data(base64Data: string) {
 }
 
 function resolveDocumentHelperPath() {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const assetSearchRoots = [
+    path.resolve(process.cwd(), ".next", "server", "assets"),
+    path.resolve(process.cwd(), "server", "assets"),
+    path.resolve(moduleDir, "../../../.next/server/assets"),
+    path.resolve(moduleDir, "../../../server/assets"),
+    path.resolve(moduleDir, "../../server/assets"),
+  ];
+
+  for (const assetRoot of assetSearchRoots) {
+    if (!existsSync(assetRoot)) continue;
+    const assetMatch = readdirSync(assetRoot).find((entry) => /^pondo-document-extract\..+\.cjs$/i.test(entry));
+    if (assetMatch) {
+      return path.join(assetRoot, assetMatch);
+    }
+  }
+
   const candidates = [
     path.resolve(process.cwd(), "scripts", "pondo-document-extract.cjs"),
     path.resolve(process.cwd(), "..", "scripts", "pondo-document-extract.cjs"),
-    fileURLToPath(new URL("../../../../scripts/pondo-document-extract.cjs", import.meta.url)),
+    path.resolve(moduleDir, "../../../../scripts/pondo-document-extract.cjs"),
   ];
 
   return candidates.find((candidate) => existsSync(candidate)) || "";
