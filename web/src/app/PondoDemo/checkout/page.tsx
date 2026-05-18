@@ -660,7 +660,10 @@ export default function PondoCheckoutPage() {
   const requiresEnhancedRiskChecks = projectedRisk.decision !== "auto_approve";
   const requiresKycPipelineView = projectedRisk.decision !== "auto_approve";
   const requiresManualReviewDocuments = projectedRisk.decision === "manual_review_hold";
+  const isManualReview = requiresManualReviewDocuments;
   const requiresProofOfAddress = requiresManualReviewDocuments;
+  const uploadedManualReviewDocuments = [identityDocument, proofOfAddressDocument].filter(Boolean).length;
+  const manualReviewDocumentsReady = Boolean(identityDocument) && Boolean(proofOfAddressDocument);
   const isSaidComplete = normalizedIdNumber.length === 13;
   const isSaidValid = isSaidComplete && validateSAID(normalizedIdNumber);
   const isUnderAge = Boolean(saidRisk?.rejected);
@@ -1296,7 +1299,7 @@ export default function PondoCheckoutPage() {
               <div className="space-y-4">
                 <h2 className="text-2xl font-extrabold">Confirm Your Details</h2>
                 <div className="rounded-lg border border-emerald-500/40 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-                  Edit and verify your personal details. Geolocation is auto-detected from your IP address.
+                  Edit and verify your personal details.
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -1559,138 +1562,153 @@ export default function PondoCheckoutPage() {
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-pondo-line bg-white p-6 shadow-sm">
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <h2 className="text-2xl font-extrabold text-pondo-navy-900">KYC Verification Pipeline</h2>
-                        <p className="mt-2 max-w-2xl text-sm text-slate-700">
-                          This order requires an additional verification step before it can be released for fulfilment.
-                        </p>
-                      </div>
-                      <div className={[
-                        "rounded-full px-4 py-2 text-xs font-black uppercase tracking-[0.08em]",
-                        projectedRisk.decision === "manual_review_hold"
-                          ? "border border-red-200 bg-red-50 text-red-600"
-                          : "border border-amber-200 bg-amber-50 text-amber-700",
-                      ].join(" ")}>
-                        Risk Score: {projectedRisk.decision === "manual_review_hold" ? Math.max(projectedRisk.score, 100) : projectedRisk.score}
-                        {" - "}
-                        {riskDecisionLabel(projectedRisk.decision)}
-                      </div>
-                    </div>
-
-                    <div className="mt-5 space-y-3">
-                      {[
-                        {
-                          title: "ID / Document Scan",
-                          detail: requiresManualReviewDocuments
-                            ? identityDocumentType === "sa_id"
-                              ? "South African ID validation and supporting document capture"
-                              : "Driver's licence capture and identity confirmation"
-                            : "South African ID validation and identity confirmation",
-                          state: requiresManualReviewDocuments ? "Pending" : isSaidValid ? "Passed" : "Pending",
-                        },
-                        {
-                          title: "Manual Review Routing",
-                          detail: projectedRisk.decision === "manual_review_hold"
-                            ? `Additional verification is required before analyst review${requiresProofOfAddress ? " with proof-of-address support attached" : ""}`
-                            : "Not required for this checkout",
-                          state: projectedRisk.decision === "manual_review_hold" ? "Pending" : "Skipped",
-                        },
-                      ].map((item) => (
-                        <div key={item.title} className="flex items-center justify-between rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-sm font-black text-white">?</div>
-                            <div>
-                              <div className="font-bold text-emerald-800">{item.title}</div>
-                              <div className="text-xs text-slate-600">{item.detail}</div>
-                            </div>
-                          </div>
-                          <div className="text-xs font-black uppercase tracking-[0.08em] text-emerald-700">{item.state}</div>
+                    {isManualReview ? (
+                      <>
+                        <div>
+                          <h2 className="text-2xl font-extrabold text-pondo-navy-900">
+                            Please upload the requested supporting documents below
+                          </h2>
+                          <p className="mt-2 text-sm text-slate-700">
+                            Your documents are securely processed in the background.
+                          </p>
                         </div>
-                      ))}
-                    </div>
 
-                    {requiresManualReviewDocuments ? (
-                      <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
-                        <div className="text-lg font-extrabold text-pondo-navy-900">Secure Order Verification</div>
-                        <p className="mt-1 text-sm text-slate-700">
-                          For your protection and to ensure secure order processing, this order requires additional verification before approval.
-                          Please upload the requested supporting documents below.
-                        </p>
-
-                        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                          <div className="rounded-xl border border-pondo-line bg-white p-4">
-                            <div className="text-sm font-bold text-pondo-navy-900">Identity document</div>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {[
-                                { id: "sa_id" as const, label: "South African ID" },
-                                { id: "drivers_licence" as const, label: "Driver's Licence" },
-                              ].map((option) => (
-                                <button
-                                  key={option.id}
-                                  type="button"
-                                  onClick={() => setIdentityDocumentType(option.id)}
-                                  className={[
-                                    "rounded-full border px-3 py-1.5 text-sm font-semibold transition",
-                                    identityDocumentType === option.id
-                                      ? "border-pondo-orange-500 bg-pondo-orange-500 text-white"
-                                      : "border-pondo-line bg-white text-pondo-navy-900 hover:bg-[#eef3ff]",
-                                  ].join(" ")}
-                                >
-                                  {option.label}
-                                </button>
-                              ))}
-                            </div>
-                            <label className="mt-4 block">
-                              <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-slate-500">Upload identity document</span>
-                              <input
-                                type="file"
-                                accept=".pdf,.jpg,.jpeg,.png"
-                                onChange={async (event) => {
-                                  setIdentityDocument(await rememberSelectedDocument(event.target.files?.[0] || null));
-                                  setDocumentAnalysis(null);
-                                }}
-                                className="block w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-pondo-orange-500 file:px-3 file:py-2 file:font-bold file:text-white"
-                              />
-                            </label>
-                            <div className="mt-2 text-xs text-slate-500">
-                              {identityDocument
-                                ? `Selected: ${identityDocument.fileName}`
-                                : `Accepted formats: PDF, JPG, PNG. Use the customer's ${identityDocumentType === "sa_id" ? "ID card/book" : "driver's licence"} image or scan.`}
-                            </div>
-                          </div>
-
-                          <div className="rounded-xl border border-pondo-line bg-white p-4">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-sm font-bold text-pondo-navy-900">Proof of address</div>
-                              <div className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-bold uppercase tracking-[0.08em] text-amber-800">
-                                Required
+                        <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
+                          <div className="grid gap-4 lg:grid-cols-2">
+                            <div className="rounded-xl border border-pondo-line bg-white p-4">
+                              <div className="text-sm font-bold text-pondo-navy-900">ID document</div>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {[
+                                  { id: "sa_id" as const, label: "South African ID" },
+                                  { id: "drivers_licence" as const, label: "Driver's Licence" },
+                                ].map((option) => (
+                                  <button
+                                    key={option.id}
+                                    type="button"
+                                    onClick={() => setIdentityDocumentType(option.id)}
+                                    className={[
+                                      "rounded-full border px-3 py-1.5 text-sm font-semibold transition",
+                                      identityDocumentType === option.id
+                                        ? "border-pondo-orange-500 bg-pondo-orange-500 text-white"
+                                        : "border-pondo-line bg-white text-pondo-navy-900 hover:bg-[#eef3ff]",
+                                    ].join(" ")}
+                                  >
+                                    {option.label}
+                                  </button>
+                                ))}
+                              </div>
+                              <label className="mt-4 block">
+                                <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-slate-500">Upload ID document</span>
+                                <input
+                                  type="file"
+                                  accept=".pdf,.jpg,.jpeg,.png"
+                                  onChange={async (event) => {
+                                    setIdentityDocument(await rememberSelectedDocument(event.target.files?.[0] || null));
+                                    setDocumentAnalysis(null);
+                                  }}
+                                  className="block w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-pondo-orange-500 file:px-3 file:py-2 file:font-bold file:text-white"
+                                />
+                              </label>
+                              <div className="mt-2 text-xs text-slate-500">
+                                {identityDocument
+                                  ? `Selected: ${identityDocument.fileName}`
+                                  : `Accepted formats: PDF, JPG, PNG. Use the customer's ${identityDocumentType === "sa_id" ? "ID card/book" : "driver's licence"} image or scan.`}
                               </div>
                             </div>
-                            <p className="mt-2 text-xs text-slate-600">
-                              Proof of address is now required because this checkout has been routed into manual review.
-                            </p>
-                            <label className="mt-4 block">
-                              <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-slate-500">Upload proof of address</span>
-                              <input
-                                type="file"
-                                accept=".pdf,.jpg,.jpeg,.png"
-                                onChange={async (event) => {
-                                  setProofOfAddressDocument(await rememberSelectedDocument(event.target.files?.[0] || null));
-                                  setDocumentAnalysis(null);
-                                }}
-                                className="block w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-sky-600 file:px-3 file:py-2 file:font-bold file:text-white"
+
+                            <div className="rounded-xl border border-pondo-line bg-white p-4">
+                              <div className="text-sm font-bold text-pondo-navy-900">Proof of address</div>
+                              <label className="mt-4 block">
+                                <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-slate-500">Upload proof of address</span>
+                                <input
+                                  type="file"
+                                  accept=".pdf,.jpg,.jpeg,.png"
+                                  onChange={async (event) => {
+                                    setProofOfAddressDocument(await rememberSelectedDocument(event.target.files?.[0] || null));
+                                    setDocumentAnalysis(null);
+                                  }}
+                                  className="block w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-sky-600 file:px-3 file:py-2 file:font-bold file:text-white"
+                                />
+                              </label>
+                              <div className="mt-2 text-xs text-slate-500">
+                                {proofOfAddressDocument
+                                  ? `Selected: ${proofOfAddressDocument.fileName}`
+                                  : "Examples: utility bill, bank statement, municipal letter, or lease document."}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-sm font-semibold text-pondo-navy-900">Upload progress</div>
+                              <div className="text-xs font-bold uppercase tracking-[0.08em] text-slate-500">
+                                {uploadedManualReviewDocuments}/2 received
+                              </div>
+                            </div>
+                            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
+                              <div
+                                className="h-full rounded-full bg-emerald-500 transition-all"
+                                style={{ width: `${(uploadedManualReviewDocuments / 2) * 100}%` }}
                               />
-                            </label>
-                            <div className="mt-2 text-xs text-slate-500">
-                              {proofOfAddressDocument
-                                ? `Selected: ${proofOfAddressDocument.fileName}`
-                                : "Examples: utility bill, bank statement, municipal letter, or lease document."}
+                            </div>
+                            <div className="mt-3 text-sm text-slate-700">
+                              {manualReviewDocumentsReady
+                                ? "Documents received - verification in progress."
+                                : "Upload both documents to continue verification."}
                             </div>
                           </div>
                         </div>
-                      </div>
-                    ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <h2 className="text-2xl font-extrabold text-pondo-navy-900">KYC Verification Pipeline</h2>
+                            <p className="mt-2 max-w-2xl text-sm text-slate-700">
+                              This order requires an additional verification step before it can be released for fulfilment.
+                            </p>
+                          </div>
+                          <div className={[
+                            "rounded-full px-4 py-2 text-xs font-black uppercase tracking-[0.08em]",
+                            "border border-amber-200 bg-amber-50 text-amber-700",
+                          ].join(" ")}>
+                            Risk Score: {projectedRisk.score}
+                            {" - "}
+                            {riskDecisionLabel(projectedRisk.decision)}
+                          </div>
+                        </div>
+
+                        <div className="mt-5 space-y-3">
+                          {[
+                            {
+                              title: "ID / Document Scan",
+                              detail: requiresManualReviewDocuments
+                                ? identityDocumentType === "sa_id"
+                                  ? "South African ID validation and supporting document capture"
+                                  : "Driver's licence capture and identity confirmation"
+                                : "South African ID validation and identity confirmation",
+                              state: requiresManualReviewDocuments ? "Pending" : isSaidValid ? "Passed" : "Pending",
+                            },
+                            {
+                              title: "Manual Review Routing",
+                              detail: "Not required for this checkout",
+                              state: "Skipped",
+                            },
+                          ].map((item) => (
+                            <div key={item.title} className="flex items-center justify-between rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3">
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-sm font-black text-white">?</div>
+                                <div>
+                                  <div className="font-bold text-emerald-800">{item.title}</div>
+                                  <div className="text-xs text-slate-600">{item.detail}</div>
+                                </div>
+                              </div>
+                              <div className="text-xs font-black uppercase tracking-[0.08em] text-emerald-700">{item.state}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
 
                     <button onClick={onConfirmVerifiedOrder} disabled={busy} className="mt-5 w-full rounded-xl bg-[#1fb782] px-4 py-3 text-lg font-black text-white shadow-[0_10px_20px_rgba(31,183,130,0.28)] hover:bg-[#19a575] disabled:opacity-60">
                       {busy

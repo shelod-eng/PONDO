@@ -1,6 +1,19 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
+function shouldServeMaintenance(hostname: string) {
+  if (process.env.PONDO_MAINTENANCE_MODE !== "true") {
+    return false;
+  }
+
+  const configuredHosts = (process.env.PONDO_MAINTENANCE_HOSTS || "www.pondo-pay.online")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+
+  return configuredHosts.includes(hostname.toLowerCase());
+}
+
 function isAssetPath(pathname: string) {
   return (
     pathname.startsWith("/_next") ||
@@ -16,7 +29,7 @@ function isAssetPath(pathname: string) {
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (process.env.PONDO_MAINTENANCE_MODE === "true") {
+  if (shouldServeMaintenance(request.nextUrl.hostname)) {
     if (isAssetPath(pathname) || pathname === "/under-construction") {
       return NextResponse.next();
     }
