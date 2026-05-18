@@ -14,11 +14,19 @@ function isAssetPath(pathname: string) {
 }
 
 export function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  if (process.env.PONDO_MAINTENANCE_MODE === "true") {
+    if (isAssetPath(pathname) || pathname === "/under-construction") {
+      return NextResponse.next();
+    }
+
+    return NextResponse.rewrite(new URL("/under-construction", request.url));
+  }
+
   if (process.env.PONDO_ADMIN_MODE !== "true") {
     return NextResponse.next();
   }
-
-  const { pathname } = request.nextUrl;
 
   if (isAssetPath(pathname)) {
     return NextResponse.next();
