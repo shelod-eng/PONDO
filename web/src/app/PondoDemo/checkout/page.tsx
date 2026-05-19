@@ -13,7 +13,6 @@ import {
   getPlaceAddress,
   login,
   persistPondoRiskAssessment,
-  resolveManualReviewOrder,
   sendOtp,
   simulateDemoCredit,
   type AddressSuggestion,
@@ -233,69 +232,24 @@ function manualReviewDisplayState(reviewStatus: string | null | undefined, riskD
     return {
       title: "Manual review approved - released to fulfilment",
       message: "The analyst approved the submitted supporting documents. The order can now move into the normal fulfilment and delivery process.",
-      chip: "Released to fulfilment",
     };
   }
   if (reviewStatus === "declined") {
     return {
       title: "Manual review declined",
       message: "The analyst declined this review after checking the submitted supporting documents. The order will not move forward to fulfilment.",
-      chip: "Review declined",
     };
   }
   if (riskDecision === "manual_review_hold") {
     return {
-      title: "Supporting documents received - awaiting manual review",
-      message: "The supporting documents were received successfully, but the order remains paused until an analyst completes the manual review.",
-      chip: "Documents received - awaiting review",
+      title: "Order received - final verification in progress",
+      message: "The supporting documents were received successfully. Final verification will continue in the background before fulfilment is finalized.",
     };
   }
   return {
     title: "Order received, thanks!",
     message: "The order is ready to continue through the normal fulfilment and delivery process.",
-    chip: "Released to fulfilment",
   };
-}
-
-function buildReviewAssistantSummary(input: {
-  reviewStatus: string | null | undefined;
-  score: number | null | undefined;
-  decision: string | null | undefined;
-  fullName: string;
-  hasIdentityDocument: boolean;
-  hasProofOfAddress: boolean;
-  identityDocumentType: IdentityDocumentType;
-  documentAnalysis?: DocumentAnalysisResult | null;
-}) {
-  const reasons = [
-    input.hasIdentityDocument
-      ? `${input.identityDocumentType === "sa_id" ? "South African ID" : "Driver's licence"} uploaded`
-      : "Primary identity document still missing",
-    input.hasProofOfAddress ? "Proof of address uploaded" : "Proof of address still missing",
-    typeof input.score === "number" ? `Composite risk score recorded at ${input.score}` : "Composite risk score pending",
-    ...(input.documentAnalysis?.recommendation.reasons || []),
-  ];
-
-  const recommendation =
-    input.reviewStatus === "approved"
-      ? "approved"
-      : input.reviewStatus === "declined"
-        ? "declined"
-        : input.documentAnalysis?.recommendation.decision === "decline"
-          ? "decline"
-          : input.documentAnalysis?.recommendation.decision === "approve"
-            ? "approve"
-        : input.hasIdentityDocument && input.hasProofOfAddress && input.decision === "manual_review_hold"
-          ? "approve"
-          : "decline";
-
-  const summary =
-    input.documentAnalysis?.recommendation.summary ||
-    (recommendation === "approve" || recommendation === "approved"
-      ? `AI review assistant recommends approval for ${input.fullName} because the required supporting documents have been received and the case is ready for fulfilment release.`
-      : `AI review assistant recommends decline or continued hold for ${input.fullName} because the case is incomplete or still presents unresolved review concerns.`);
-
-  return { recommendation, summary, reasons };
 }
 
 function money(cents: number) {
@@ -503,7 +457,7 @@ export default function PondoCheckoutPage() {
   const [identityDocument, setIdentityDocument] = useState<SelectedDocument | null>(null);
   const [proofOfAddressDocument, setProofOfAddressDocument] = useState<SelectedDocument | null>(null);
   const [documentAnalysis, setDocumentAnalysis] = useState<DocumentAnalysisResult | null>(null);
-  const [reviewAssistantOpen, setReviewAssistantOpen] = useState(false);
+  const [showOpenAiReviewAssistant, setShowOpenAiReviewAssistant] = useState(false);
   const [, setApiLogs] = useState<string[]>(["Awaiting transaction initiation..."]);
 
   const customer = session?.customer || null;
@@ -1193,37 +1147,8 @@ export default function PondoCheckoutPage() {
     }
   }
 
-  async function onResolveManualReview(decision: "approved" | "declined") {
-    if (!completedOrderId) return;
-    setError("");
-    setBusy(true);
-    setProcessingMessage(decision === "approved" ? "Analyst review approved. Releasing order to fulfilment..." : "Analyst review declined. Updating the order status...");
-    try {
-      const authToken = await ensureCustomerAuth(true, capturedEmail || customer?.email);
-      const out = await resolveManualReviewOrder(authToken, completedOrderId, decision);
-      setCompletedTransaction(out.transaction);
-      setProcessingMessage("");
-    } catch (e) {
-      setProcessingMessage("");
-      setError(e instanceof Error ? e.message : "manual_review_resolve_failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const step3Label = completedOrderId ? "Completed" : requiresKycPipelineView ? "KYC Verification" : "OTP Verification";
   const completedReviewState = manualReviewDisplayState(completedTransaction?.review_status, completedRiskAssessment?.decision);
-  const reviewAssistant = buildReviewAssistantSummary({
-    reviewStatus: completedTransaction?.review_status,
-    score: completedRiskAssessment?.score,
-    decision: completedRiskAssessment?.decision,
-    fullName: capturedFullName,
-    hasIdentityDocument: Boolean(identityDocument),
-    hasProofOfAddress: Boolean(proofOfAddressDocument),
-    identityDocumentType,
-    documentAnalysis,
-  });
-
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#e9f1ff_0%,#f7faff_34%,#edf4ff_100%)] text-pondo-navy-900">
       <PondoDemoNav />
@@ -1779,17 +1704,9 @@ export default function PondoCheckoutPage() {
                         ? "Manual review is complete and the order has been released to fulfilment. PED payment is still collected later in the normal delivery journey."
                         : completedTransaction?.review_status === "declined"
                           ? "Manual review declined this order after document review. Fulfilment and PED payment are both stopped."
-                          : "Supporting documents have been attached to this case. Ops review is now required, and settlement and reconciliation remain blank until manual approval and PED payment both complete."
+                          : "Your order has been received. Final verification is continuing in the background before fulfilment is finalized."
                       : "Email and SMS notifications include the order summary, delivery address, estimated fulfilment date, and the PONDO verification outcome. Settlement and reconciliation will only update after PED payment is completed at the customer doorstep."}
                   </div>
-
-                  {completedRiskAssessment?.decision === "manual_review_hold" ? (
-                    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                      <div className="font-bold text-pondo-navy-900">Manual Review Status</div>
-                      <div className="mt-2">{completedReviewState.message}</div>
-                      <div className="mt-2 text-xs uppercase tracking-[0.08em] text-slate-500">Verification: {completedRiskAssessment.verifiedStatus}</div>
-                    </div>
-                  ) : null}
 
                   <div className="mt-4 flex flex-wrap gap-3">
                     <button onClick={() => router.push(`/PondoDemo/confirmation/${completedOrderId}`)} className="rounded-lg bg-pondo-orange-500 px-4 py-2 font-bold text-white hover:bg-pondo-orange-400">
@@ -1798,37 +1715,88 @@ export default function PondoCheckoutPage() {
                     <button onClick={() => router.push("/PondoDemo/shop")} className="rounded-lg border border-pondo-line bg-white px-4 py-2 font-bold text-pondo-navy-900 hover:bg-[#eef3ff]">
                       Continue shopping
                     </button>
-                    {completedRiskAssessment?.decision === "manual_review_hold" && completedTransaction?.review_status !== "approved" && completedTransaction?.review_status !== "declined" ? (
+                    {completedRiskAssessment?.decision === "manual_review_hold" && manualReviewDocumentsReady && documentAnalysis ? (
                       <button
-                        onClick={() => setReviewAssistantOpen(true)}
-                        className="rounded-lg bg-pondo-navy-900 px-4 py-2 font-bold text-white hover:bg-[#243b68]"
+                        type="button"
+                        onClick={() => setShowOpenAiReviewAssistant((current) => !current)}
+                        className="rounded-lg bg-pondo-navy-900 px-4 py-2 font-bold text-white hover:bg-pondo-navy-800"
                       >
-                        Open AI Review Assistant Demo
+                        {showOpenAiReviewAssistant ? "Hide Open AI Review Assistant Demo" : "Open AI Review Assistant Demo"}
                       </button>
                     ) : null}
                   </div>
 
-                  <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                    {vetResult?.screeningMode === "full" || requiresEnhancedRiskChecks ? (
-                      <>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">OTP verified</div>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">ID verified</div>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Credit and fraud checks completed</div>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
-                          {completedRiskAssessment?.decision === "manual_review_hold"
-                            ? completedReviewState.chip
-                            : "Released to fulfilment"}
+                  {completedRiskAssessment?.decision === "manual_review_hold" && showOpenAiReviewAssistant && documentAnalysis ? (
+                    <div className="mt-4 rounded-2xl border border-pondo-line bg-[#f7faff] p-5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-lg font-extrabold text-pondo-navy-900">Open AI Review Assistant Demo</h3>
+                          <p className="mt-1 text-sm text-slate-600">
+                            OCR and document extraction summary for the uploaded manual-review pack.
+                          </p>
                         </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">OTP verified</div>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Trusted profile</div>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">No KYC required</div>
-                        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">Order confirmed</div>
-                      </>
-                    )}
-                  </div>
+                        <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-black uppercase tracking-[0.08em] text-slate-600">
+                          {documentAnalysis.recommendation.decision.replace("_", " ")} | score {documentAnalysis.recommendation.score}
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                        <div className="rounded-xl border border-pondo-line bg-white p-4">
+                          <div className="text-sm font-bold text-pondo-navy-900">Identity document OCR</div>
+                          <div className="mt-2 text-xs font-bold uppercase tracking-[0.08em] text-slate-500">
+                            Source: {documentAnalysis.identity.source}
+                          </div>
+                          <div className="mt-3 space-y-2 text-sm text-slate-700">
+                            <div><span className="font-semibold text-pondo-navy-900">Document type:</span> {documentAnalysis.identity.documentType === "sa_id" ? "South African ID" : "Driver's Licence"}</div>
+                            <div><span className="font-semibold text-pondo-navy-900">ID number:</span> {documentAnalysis.identity.extracted.idNumber || "Not extracted"}</div>
+                            <div><span className="font-semibold text-pondo-navy-900">Full name:</span> {documentAnalysis.identity.extracted.fullName || "Not extracted"}</div>
+                            <div><span className="font-semibold text-pondo-navy-900">Birth date:</span> {documentAnalysis.identity.extracted.birthDate || "Not extracted"}</div>
+                            <div><span className="font-semibold text-pondo-navy-900">Gender:</span> {documentAnalysis.identity.extracted.gender || "Not extracted"}</div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-pondo-line bg-white p-4">
+                          <div className="text-sm font-bold text-pondo-navy-900">Proof of address OCR</div>
+                          <div className="mt-2 text-xs font-bold uppercase tracking-[0.08em] text-slate-500">
+                            Source: {documentAnalysis.proofOfAddress?.source || "Unavailable"}
+                          </div>
+                          <div className="mt-3 space-y-2 text-sm text-slate-700">
+                            <div><span className="font-semibold text-pondo-navy-900">Account holder:</span> {documentAnalysis.proofOfAddress?.extracted.accountHolderName || "Not extracted"}</div>
+                            <div><span className="font-semibold text-pondo-navy-900">Address line:</span> {documentAnalysis.proofOfAddress?.extracted.addressLine1 || "Not extracted"}</div>
+                            <div><span className="font-semibold text-pondo-navy-900">Suburb:</span> {documentAnalysis.proofOfAddress?.extracted.suburb || "Not extracted"}</div>
+                            <div><span className="font-semibold text-pondo-navy-900">Municipality:</span> {documentAnalysis.proofOfAddress?.extracted.municipality || "Not extracted"}</div>
+                            <div><span className="font-semibold text-pondo-navy-900">Postal code:</span> {documentAnalysis.proofOfAddress?.extracted.postalCode || "Not extracted"}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                        <div className="rounded-xl border border-pondo-line bg-white p-4 text-sm text-slate-700">
+                          <div className="text-sm font-bold text-pondo-navy-900">Comparison checks</div>
+                          <div className="mt-3 space-y-2">
+                            <div><span className="font-semibold text-pondo-navy-900">ID matches entered ID:</span> {documentAnalysis.comparisons.idMatchesEnteredId === null ? "Not checked" : documentAnalysis.comparisons.idMatchesEnteredId ? "Yes" : "No"}</div>
+                            <div><span className="font-semibold text-pondo-navy-900">Name matches order:</span> {documentAnalysis.comparisons.nameMatchesOrderName === null ? "Not checked" : documentAnalysis.comparisons.nameMatchesOrderName ? "Yes" : "No"}</div>
+                            <div><span className="font-semibold text-pondo-navy-900">Address matches delivery:</span> {documentAnalysis.comparisons.addressMatchesDeliveryAddress === null ? "Not checked" : documentAnalysis.comparisons.addressMatchesDeliveryAddress ? "Yes" : "No"}</div>
+                            <div><span className="font-semibold text-pondo-navy-900">Postal code matches:</span> {documentAnalysis.comparisons.postalCodeMatches === null ? "Not checked" : documentAnalysis.comparisons.postalCodeMatches ? "Yes" : "No"}</div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-pondo-line bg-white p-4 text-sm text-slate-700">
+                          <div className="text-sm font-bold text-pondo-navy-900">Assistant recommendation</div>
+                          <p className="mt-3">{documentAnalysis.recommendation.summary}</p>
+                          {documentAnalysis.recommendation.reasons.length > 0 ? (
+                            <div className="mt-3 space-y-2">
+                              {documentAnalysis.recommendation.reasons.map((reason) => (
+                                <div key={reason} className="rounded-lg bg-[#f7faff] px-3 py-2">
+                                  {reason}
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ) : null}
@@ -1882,7 +1850,7 @@ export default function PondoCheckoutPage() {
                       ? "Manual review approved. The order is released to fulfilment and awaits the normal PED collection step."
                       : completedTransaction?.review_status === "declined"
                         ? "Manual review declined the order after document review. PED collection, settlement, and fulfilment will not proceed."
-                        : "Manual review is pending. Supporting documents were received, but PED collection, settlement, and reconciliation stay blocked until ops release the order."}
+                        : "Final verification is continuing in the background before fulfilment is finalized."}
                   </div>
                 ) : (
                   <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -1895,141 +1863,6 @@ export default function PondoCheckoutPage() {
         </div>
       </div>
 
-      {reviewAssistantOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4">
-          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.28)]">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
-              <div>
-                <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Demo Review Popup</div>
-                <h3 className="mt-2 text-2xl font-extrabold text-pondo-navy-900">AI Review Assistant</h3>
-                <p className="mt-2 text-sm text-slate-600">
-                  This demo pop-screen represents a back-office analyst workflow. The customer would not see this in production.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setReviewAssistantOpen(false)}
-                className="rounded-full border border-slate-200 px-3 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="overflow-y-auto px-6 py-5">
-              <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-900">
-                <div className="font-bold">Assistant recommendation</div>
-                <div className="mt-2">{reviewAssistant.summary}</div>
-              </div>
-
-              <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                <div className="text-sm font-bold text-pondo-navy-900">Review signals considered</div>
-                <div className="mt-3 grid gap-2 lg:grid-cols-2 text-sm text-slate-700">
-                  {reviewAssistant.reasons.map((reason) => (
-                    <div key={reason} className="rounded-xl bg-white px-3 py-2">
-                      {reason}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {documentAnalysis ? (
-                <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                    <div className="text-sm font-bold text-pondo-navy-900">Identity extraction</div>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2 text-sm text-slate-700">
-                      {[
-                        ["ID number", documentAnalysis.identity.extracted.idNumber || "Not extracted"],
-                        ["Full name", documentAnalysis.identity.extracted.fullName || "Not extracted"],
-                        ["Date of birth", documentAnalysis.identity.extracted.birthDate || "Not extracted"],
-                        ["Gender", documentAnalysis.identity.extracted.gender || "Not extracted"],
-                        ["Citizenship", documentAnalysis.identity.extracted.citizenship || "Not extracted"],
-                      ].map(([label, value]) => (
-                        <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                          <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">{label}</div>
-                          <div className="mt-1 text-sm text-slate-800">{value}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-3 text-xs text-slate-500">Source: {documentAnalysis.identity.source}</div>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                    <div className="text-sm font-bold text-pondo-navy-900">Address extraction</div>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2 text-sm text-slate-700">
-                      {[
-                        ["Account holder", documentAnalysis.proofOfAddress?.extracted.accountHolderName || "Not extracted"],
-                        ["Document type", documentAnalysis.proofOfAddress?.extracted.documentType || "Not extracted"],
-                        ["Invoice date", documentAnalysis.proofOfAddress?.extracted.invoiceDate || "Not extracted"],
-                        ["Address line 1", documentAnalysis.proofOfAddress?.extracted.addressLine1 || "Not extracted"],
-                        ["Suburb", documentAnalysis.proofOfAddress?.extracted.suburb || "Not extracted"],
-                        ["Municipality / area", documentAnalysis.proofOfAddress?.extracted.municipality || "Not extracted"],
-                        ["Postal code", documentAnalysis.proofOfAddress?.extracted.postalCode || "Not extracted"],
-                        [
-                          "Valid for review",
-                          documentAnalysis.proofOfAddress?.extracted.validForReview === null || documentAnalysis.proofOfAddress?.extracted.validForReview === undefined
-                            ? "Not determined"
-                            : documentAnalysis.proofOfAddress.extracted.validForReview
-                              ? "Yes"
-                              : "No",
-                        ],
-                        ["Document age (days)", documentAnalysis.proofOfAddress?.extracted.documentAgeDays?.toString() || "Not extracted"],
-                        ["Confidence score", documentAnalysis.proofOfAddress?.extracted.confidenceScore?.toString() || "Not extracted"],
-                        [
-                          "Full extracted address",
-                          [
-                            documentAnalysis.proofOfAddress?.extracted.addressLine1,
-                            documentAnalysis.proofOfAddress?.extracted.suburb,
-                            documentAnalysis.proofOfAddress?.extracted.municipality,
-                            documentAnalysis.proofOfAddress?.extracted.postalCode,
-                          ].filter(Boolean).join(", ") || "Not extracted",
-                        ],
-                      ].map(([label, value]) => (
-                        <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                          <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">{label}</div>
-                          <div className="mt-1 text-sm text-slate-800">{value}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                      <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">SAPS zone check</div>
-                      <div className="mt-1 text-sm text-slate-800">
-                        {documentAnalysis.comparisons.sapsAreaMatch
-                          ? `${documentAnalysis.comparisons.sapsAreaMatch} (${documentAnalysis.comparisons.sapsRiskTier})`
-                          : "No direct match"}
-                      </div>
-                    </div>
-                    <div className="mt-3 text-xs text-slate-500">Source: {documentAnalysis.proofOfAddress?.source || "unavailable"}</div>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="border-t border-slate-200 px-6 py-5">
-              <div className="flex flex-wrap gap-3">
-              <button
-                onClick={async () => {
-                  await onResolveManualReview("approved");
-                  setReviewAssistantOpen(false);
-                }}
-                disabled={busy}
-                className="rounded-xl bg-[#1fb782] px-5 py-3 font-bold text-white hover:bg-[#19a575] disabled:opacity-60"
-              >
-                {busy ? "Updating review..." : "Approve And Release To Fulfilment"}
-              </button>
-              <button
-                onClick={async () => {
-                  await onResolveManualReview("declined");
-                  setReviewAssistantOpen(false);
-                }}
-                disabled={busy}
-                className="rounded-xl border border-red-300 bg-white px-5 py-3 font-bold text-red-700 hover:bg-red-50 disabled:opacity-60"
-              >
-                {busy ? "Updating review..." : "Decline Review"}
-              </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

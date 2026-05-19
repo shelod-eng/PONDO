@@ -27,6 +27,7 @@ function scoreText(text) {
   if (/\b\d{6}\s+\d{4}\s+\d{2}\s+\d\b/.test(normalized)) score += 35;
   if (/\b\d{4}-\d{2}-\d{2}\b/.test(normalized)) score += 15;
   if (/SURNAME|VAN|FORENAMES|VOORNAME|CITIZEN/i.test(normalized)) score += 15;
+  if (/ACCOUNT NUMBER|INVOICE DATE|TAX INVOICE|STATEMENT|POSTAL CODE|STREET|MUNICIPALITY|ACCOUNT HOLDER/i.test(normalized)) score += 25;
   score += Math.min(20, normalized.trim().length / 60);
   return score;
 }
@@ -63,6 +64,8 @@ async function run() {
 
   if (mode === "image_ocr") {
     const variants = [buffer];
+    try { variants.push(await rotate(buffer, Math.PI / 2)); } catch {}
+    try { variants.push(await rotate(buffer, -Math.PI / 2)); } catch {}
     try { variants.push(await crop(buffer, 0, 0, 1, 0.42, 2)); } catch {}
     try { variants.push(await crop(buffer, 0, 0, 1, 0.24, 3)); } catch {}
     try { variants.push(await crop(buffer, 0, 0.18, 1, 0.2, 3)); } catch {}

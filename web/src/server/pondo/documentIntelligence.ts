@@ -1,9 +1,8 @@
 import { parseSouthAfricanId } from "@/lib/validateSAID";
 import type { DocumentAnalysisResult, DocumentUploadPayload } from "@/lib/api";
-import { execFile } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
+import { createRequire } from "node:module";
+
+const nodeRequire = createRequire(import.meta.url);
 
 type AnalyzeDocumentsInput = {
   identityDocumentType: "sa_id" | "drivers_licence";
@@ -119,53 +118,6 @@ function normalizeDocumentText(text: string) {
 function decodeBase64Data(base64Data: string) {
   const payload = base64Data.includes(",") ? base64Data.slice(base64Data.indexOf(",") + 1) : base64Data;
   return Buffer.from(payload, "base64");
-}
-
-function resolveDocumentHelperPath() {
-  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-  const assetSearchRoots = [
-    path.resolve(process.cwd(), ".next", "server", "assets"),
-    path.resolve(process.cwd(), "server", "assets"),
-    path.resolve(moduleDir, "../../../.next/server/assets"),
-    path.resolve(moduleDir, "../../../server/assets"),
-    path.resolve(moduleDir, "../../server/assets"),
-  ];
-
-  for (const assetRoot of assetSearchRoots) {
-    if (!existsSync(assetRoot)) continue;
-    const assetMatch = readdirSync(assetRoot).find((entry) => /^pondo-document-extract\..+\.cjs$/i.test(entry));
-    if (assetMatch) {
-      return path.join(assetRoot, assetMatch);
-    }
-  }
-
-  const candidates = [
-    path.resolve(process.cwd(), "scripts", "pondo-document-extract.cjs"),
-    path.resolve(process.cwd(), "..", "scripts", "pondo-document-extract.cjs"),
-    path.resolve(moduleDir, "../../../../scripts/pondo-document-extract.cjs"),
-  ];
-
-  return candidates.find((candidate) => existsSync(candidate)) || "";
-}
-
-function runDocumentExtractionHelper(mode: "pdf_text" | "pdf_ocr" | "image_ocr", file: DocumentUploadPayload) {
-  return new Promise<string>((resolve) => {
-    const helperPath = resolveDocumentHelperPath();
-    if (!helperPath) {
-      resolve("");
-      return;
-    }
-
-    const child = execFile(process.execPath, [helperPath], { cwd: process.cwd(), windowsHide: true }, (error, stdout) => {
-      if (error) {
-        resolve("");
-        return;
-      }
-      resolve(String(stdout || "").trim());
-    });
-
-    child.stdin?.end(JSON.stringify({ mode, file }));
-  });
 }
 
 function normalizeOcrIdentityText(text: string) {
@@ -328,9 +280,21 @@ function extractIdentityNamesFromOcrLines(text: string) {
 
 async function extractPdfText(file: DocumentUploadPayload) {
   const buffer = decodeBase64Data(file.base64Data);
-  const helperText = await runDocumentExtractionHelper("pdf_text", file);
-  if (helperText && helperText !== "-- 1 of 1 --") {
-    return helperText;
+
+  try {
+    const { PDFParse } = nodeRequire("pdf-parse");
+    const parser = new PDFParse({ data: buffer });
+    try {
+      const result = await parser.getText();
+      const text = String(result.text || "").trim();
+      if (text && text !== "-- 1 of 1 --") {
+        return text;
+      }
+    } finally {
+      await parser.destroy().catch(() => {});
+    }
+  } catch {
+    // Fall back to pdfjs text extraction below.
   }
 
   try {
@@ -372,13 +336,28 @@ async function extractPdfText(file: DocumentUploadPayload) {
 }
 
 async function extractPdfPageImages(file: DocumentUploadPayload) {
-  void file;
-  return [];
-}
+  const buffer = decodeBase64Data(file.base64Data);
 
-async function buildRotatedImageVariants(buffer: Buffer) {
-  const variants: Buffer[] = [buffer];
-  return variants;
+  try {
+    const { PDFParse } = nodeRequire("pdf-parse");
+    const parser = new PDFParse({ data: buffer });
+    try {
+      const shot = await parser.getScreenshot({
+        first: 2,
+        imageDataUrl: false,
+        imageBuffer: true,
+        desiredWidth: 1800,
+      });
+
+      return (shot.pages || [])
+        .map((page: { data?: Uint8Array | Buffer } | null | undefined) => (page?.data ? Buffer.from(page.data) : null))
+        .filter((page: Buffer | null): page is Buffer => Boolean(page));
+    } finally {
+      await parser.destroy().catch(() => {});
+    }
+  } catch {
+    return [];
+  }
 }
 
 function scoreOcrIdentityText(text: string) {
@@ -391,19 +370,46 @@ function scoreOcrIdentityText(text: string) {
   return score;
 }
 
+function scoreOcrDocumentText(text: string) {
+  const normalized = String(text || "");
+  let score = 0;
+  if (/[I1l|]\.?\s*D\.?\s*NO/i.test(normalized)) score += 55;
+  if (/(\d\s*){13}/.test(normalized)) score += 40;
+  if (/\b\d{6}\s+\d{4}\s+\d{2}\s+\d\b/.test(normalized)) score += 35;
+  if (/\b\d{4}-\d{2}-\d{2}\b/.test(normalized)) score += 15;
+  if (/SURNAME|VAN|FORENAMES|VOORNAME|CITIZEN/i.test(normalized)) score += 15;
+  if (/ACCOUNT NUMBER|INVOICE DATE|TAX INVOICE|STATEMENT|POSTAL CODE|STREET/i.test(normalized)) score += 25;
+  score += Math.min(20, normalized.trim().length / 60);
+  return score;
+}
+
 async function extractOcrText(file: DocumentUploadPayload) {
   const mimeType = file.mimeType.toLowerCase();
   const isPdf = mimeType === "application/pdf" || file.fileName.toLowerCase().endsWith(".pdf");
   if (isPdf) {
-    const helperText = await runDocumentExtractionHelper("pdf_ocr", file);
-    if (helperText) return helperText;
-  } else {
-    const helperText = await runDocumentExtractionHelper("image_ocr", file);
-    if (helperText) return helperText;
+    const Tesseract = nodeRequire("tesseract.js");
+    const buffers = await extractPdfPageImages(file);
+    if (buffers.length === 0) return "";
+
+    const ranked: Array<{ text: string; score: number }> = [];
+    for (const variant of buffers) {
+      const result = await Tesseract.recognize(variant, "eng");
+      const text = String(result?.data?.text || "").trim();
+      if (!text) continue;
+      ranked.push({ text, score: scoreOcrDocumentText(text) });
+    }
+
+    return ranked.sort((left, right) => right.score - left.score).map((item) => item.text).filter(Boolean)[0] || "";
   }
-  const buffers = isPdf ? await extractPdfPageImages(file) : [decodeBase64Data(file.base64Data)];
-  if (buffers.length === 0) return "";
-  return "";
+
+  try {
+    const Tesseract = nodeRequire("tesseract.js");
+    const buffer = decodeBase64Data(file.base64Data);
+    const result = await Tesseract.recognize(buffer, "eng");
+    return String(result?.data?.text || "").trim();
+  } catch {
+    return "";
+  }
 }
 
 function firstRegex(text: string, pattern: RegExp) {
@@ -535,7 +541,6 @@ function extractIdentityFromText(
   documentType: "sa_id" | "drivers_licence",
   enteredIdNumber: string,
   fullName: string,
-  fileName: string,
   sourceHint: DocumentAnalysisResult["identity"]["source"],
 ) {
   const upper = normalizeUpper(text);
@@ -571,10 +576,10 @@ function extractIdentityFromText(
 
   if (!upper.trim()) {
     if (normalize(fullName)) {
-      source = /id lebo mpeta/i.test(fileName) ? "demo_filename" : "derived_from_form";
+      source = "derived_from_form";
       issues.push("Identity document does not expose a readable text layer, so the analyst view is using the submitted identity details until OCR is added.");
     } else {
-      source = /id lebo mpeta/i.test(fileName) ? "demo_filename" : "unavailable";
+      source = "unavailable";
       issues.push("Identity document does not expose a readable text layer, so the uploaded file still needs OCR or analyst review.");
     }
   }
@@ -734,7 +739,6 @@ export async function analyzeManualReviewDocuments(input: AnalyzeDocumentsInput)
     input.identityDocumentType,
     input.enteredIdNumber,
     input.fullName,
-    input.identityDocument.fileName,
     identitySource,
   );
   const proofOfAddress = input.proofOfAddressDocument
