@@ -76,6 +76,8 @@ type SelectedDocument = {
   base64Data: string;
 };
 
+const DOCUMENT_ANALYSIS_TIMEOUT_MS = 15_000;
+
 const DEMO_CUSTOMER_PROFILES: DemoCustomerProfile[] = [
   {
     email: "thabo@email.com",
@@ -639,7 +641,114 @@ export default function PondoCheckoutPage() {
     if (!proofDocument || !isPdfDocument(proofDocument)) return false;
     if (!(error instanceof Error)) return false;
     const status = "status" in error && typeof error.status === "number" ? error.status : null;
-    return status === 400 || status === 413;
+    const code = "code" in error && typeof error.code === "string" ? error.code : "";
+    return status === 400 || status === 413 || code === "document_analysis_timeout";
+  }
+
+  function isDocumentAnalysisTimeoutError(error: unknown) {
+    return error instanceof Error && "code" in error && error.code === "document_analysis_timeout";
+  }
+
+  async function analyzeManualReviewDocumentsWithTimeout(
+    authToken: string,
+    input: {
+      identityDocumentType: "sa_id" | "drivers_licence";
+      fullName: string;
+      enteredIdNumber: string;
+      deliveryAddress: {
+        address1: string;
+        city: string;
+        province: string;
+        postalCode: string;
+      };
+      clientGeo?: {
+        city?: string;
+        province?: string;
+        country?: string;
+      };
+      orderValueCents: number;
+      identityDocument: SelectedDocument;
+      proofOfAddressDocument?: SelectedDocument | null;
+    },
+  ) {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      return await Promise.race([
+        analyzeManualReviewDocuments(authToken, input),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(Object.assign(new Error("Document analysis timed out while preparing the manual review pack."), { code: "document_analysis_timeout" }));
+          }, DOCUMENT_ANALYSIS_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  function buildFallbackDocumentAnalysis(reason: string): DocumentAnalysisResult {
+    const normalizedProofName = proofOfAddressDocument?.fileName.toLowerCase() || "";
+    const proofDocumentType =
+      normalizedProofName.includes("invoice")
+        ? "Invoice"
+        : normalizedProofName.includes("statement")
+          ? "Statement"
+          : normalizedProofName.includes("utility")
+            ? "Utility Bill"
+            : "Supporting Document";
+
+    return {
+      identity: {
+        documentType: identityDocumentType,
+        source: "derived_from_form",
+        extracted: {
+          idNumber: normalizedIdNumber || null,
+          fullName: capturedFullName || null,
+          firstName: capturedFullName.trim().split(/\s+/)[0] || null,
+          surname: capturedFullName.trim().split(/\s+/).slice(1).join(" ") || null,
+          birthDate: saidRisk?.birthDate || null,
+          gender: saidRisk?.gender || null,
+          citizenship: identityDocumentType === "sa_id" ? "South African" : null,
+          licenseNumber: null,
+        },
+        issues: [reason, "Customer-entered identity details were used so the manual review case can still be created."],
+      },
+      proofOfAddress: proofOfAddressDocument
+        ? {
+            source: "derived_from_form",
+            extracted: {
+              accountHolderName: capturedFullName || null,
+              addressLine1: capturedAddress || null,
+              suburb: null,
+              municipality: capturedCity || null,
+              postalCode: capturedPostalCode || null,
+              invoiceDate: null,
+              documentType: proofDocumentType,
+              validForReview: true,
+              documentAgeDays: null,
+              confidenceScore: null,
+            },
+            issues: [reason, "The uploaded proof-of-address file was attached, but customer-entered delivery details were used for the analyst summary."],
+          }
+        : null,
+      comparisons: {
+        idMatchesEnteredId: normalizedIdNumber ? true : null,
+        nameMatchesOrderName: capturedFullName ? true : null,
+        addressMatchesDeliveryAddress: capturedAddress ? true : null,
+        postalCodeMatches: capturedPostalCode ? true : null,
+        geoMatchesProvince: capturedProvince ? true : null,
+        sapsAreaMatch: null,
+        sapsRiskTier: null,
+        sapsSeverityIndex: null,
+        riskFlags: [reason],
+      },
+      recommendation: {
+        decision: "manual_review",
+        score: 35,
+        summary: "Inline OCR did not finish in time, so the order was moved forward using the uploaded files plus customer-entered details for analyst verification.",
+        reasons: [reason, "Manual review can continue without blocking checkout confirmation."],
+      },
+    };
   }
 
   async function rememberSelectedDocument(file: File | null) {
@@ -1109,16 +1218,29 @@ export default function PondoCheckoutPage() {
         } as const;
 
         try {
-          latestDocumentAnalysis = await analyzeManualReviewDocuments(authToken, analysisInput);
+          latestDocumentAnalysis = await analyzeManualReviewDocumentsWithTimeout(authToken, analysisInput);
         } catch (error) {
-          if (!shouldRetryDocumentAnalysisWithoutProof(error, proofOfAddressDocument)) throw error;
-
-          log("Proof-of-address PDF could not be analyzed inline. Retrying without OCR extraction for that file.");
-          setProcessingMessage("Proof-of-address PDF uploaded. Retrying verification without inline OCR extraction...");
-          latestDocumentAnalysis = await analyzeManualReviewDocuments(authToken, {
-            ...analysisInput,
-            proofOfAddressDocument: null,
-          });
+          if (shouldRetryDocumentAnalysisWithoutProof(error, proofOfAddressDocument)) {
+            log("Proof-of-address PDF could not be analyzed inline. Retrying without OCR extraction for that file.");
+            setProcessingMessage("Proof-of-address PDF uploaded. Retrying verification without inline OCR extraction...");
+            try {
+              latestDocumentAnalysis = await analyzeManualReviewDocumentsWithTimeout(authToken, {
+                ...analysisInput,
+                proofOfAddressDocument: null,
+              });
+            } catch (retryError) {
+              if (!isDocumentAnalysisTimeoutError(retryError)) throw retryError;
+              log("Inline document OCR timed out again. Falling back to uploaded-file context so manual review can continue.");
+              setProcessingMessage("Inline OCR timed out. Continuing with uploaded documents and customer-entered details...");
+              latestDocumentAnalysis = buildFallbackDocumentAnalysis("Proof-of-address OCR timed out during manual review preparation.");
+            }
+          } else if (isDocumentAnalysisTimeoutError(error)) {
+            log("Inline document OCR timed out. Falling back to uploaded-file context so manual review can continue.");
+            setProcessingMessage("Inline OCR timed out. Continuing with uploaded documents and customer-entered details...");
+            latestDocumentAnalysis = buildFallbackDocumentAnalysis("Identity-document OCR timed out during manual review preparation.");
+          } else {
+            throw error;
+          }
         }
         setDocumentAnalysis(latestDocumentAnalysis);
         log(`Document analysis sources - ID: ${latestDocumentAnalysis.identity.source}; Proof: ${latestDocumentAnalysis.proofOfAddress?.source || "unavailable"}`);
