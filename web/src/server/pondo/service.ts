@@ -102,6 +102,7 @@ type ConfirmCheckoutDetailsInput = {
   geoLocation?: string;
   latitude?: number | null;
   longitude?: number | null;
+  tapToPayConfirmed: boolean;
   termsAccepted: boolean;
 };
 
@@ -1311,6 +1312,7 @@ export async function confirmCheckoutDetails(input: ConfirmCheckoutDetailsInput)
   const session = await getCheckoutSessionByCode(input.sessionId);
   if (!session) throw new Error("session_not_found");
   if (!input.termsAccepted) throw new Error("terms_required");
+  if (!input.tapToPayConfirmed) throw new Error("tap_to_pay_required");
 
   const customer = await ensureCustomerByEmail(input.email, {
     fullName: input.fullName,
@@ -1349,6 +1351,7 @@ export async function confirmCheckoutDetails(input: ConfirmCheckoutDetailsInput)
     province: input.province,
     postalCode: input.postalCode,
     geoLocation: input.geoLocation || "",
+    tapToPayConfirmed: input.tapToPayConfirmed,
     monthlyIncome: customer.monthlyIncome,
     affordabilityBand: customer.affordabilityBand,
   };
@@ -1387,7 +1390,7 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
   const affordabilityIncome = input.experianIncome ?? null;
   const documentContext = input.documentContext || {};
   const projectedDecision = input.projectedDecision || (input.approved ? "auto_approve" : "manual_review_hold");
-  const requiresManualReview = projectedDecision !== "auto_approve";
+  const requiresManualReview = projectedDecision === "manual_review_hold";
   const score = typeof input.projectedScore === "number"
     ? input.projectedScore
     : input.screeningMode === "skip"
@@ -1434,7 +1437,11 @@ export async function recordRiskAssessment(input: RecordRiskAssessmentInput) {
       band,
       persistedVerificationStatus,
       requiresManualReview,
-      requiresManualReview ? "Screening requires manual analyst review." : "Automated screening approved checkout.",
+      requiresManualReview
+        ? "Screening requires manual analyst review."
+        : projectedDecision === "elevated_verification"
+          ? "Elevated verification completed and checkout was approved automatically."
+          : "Automated screening approved checkout.",
       JSON.stringify({
         saIdHash: hashText(input.saId),
         bureau: input.bureau,

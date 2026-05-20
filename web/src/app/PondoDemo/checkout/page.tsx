@@ -68,6 +68,7 @@ type VetResult = {
 };
 
 type IdentityDocumentType = "sa_id" | "drivers_licence";
+type TapToPayStatus = "yes" | "no" | "";
 
 type SelectedDocument = {
   fileName: string;
@@ -421,6 +422,7 @@ export default function PondoCheckoutPage() {
   const [otpInput, setOtpInput] = useState("");
   const [otpVerified, setOtpVerified] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const [tapToPayStatus, setTapToPayStatus] = useState<TapToPayStatus>("");
   const [demoOtp, setDemoOtp] = useState("");
 
   const [capturedFullName, setCapturedFullName] = useState("");
@@ -614,7 +616,7 @@ export default function PondoCheckoutPage() {
     [addressValidation?.city, addressValidation?.province, capturedCity, capturedProvince, cartSubtotalCents, clientGeo, deviceFingerprint, normalizedIdNumber],
   );
   const requiresEnhancedRiskChecks = projectedRisk.decision !== "auto_approve";
-  const requiresKycPipelineView = projectedRisk.decision !== "auto_approve";
+  const requiresKycPipelineView = projectedRisk.decision === "manual_review_hold";
   const requiresManualReviewDocuments = projectedRisk.decision === "manual_review_hold";
   const isManualReview = requiresManualReviewDocuments;
   const requiresProofOfAddress = requiresManualReviewDocuments;
@@ -798,6 +800,7 @@ export default function PondoCheckoutPage() {
       setOtpInput("");
       setOtpVerified(false);
       setTermsAccepted(false);
+      setTapToPayStatus("");
       setVetResult(null);
       setPaymentSettlement(null);
       setCompletedTransaction(null);
@@ -936,6 +939,14 @@ export default function PondoCheckoutPage() {
       setError("Please choose a delivery time slot before proceeding.");
       return;
     }
+    if (!tapToPayStatus) {
+      setError("Please ask the customer whether their bank card supports tap-to-pay before proceeding.");
+      return;
+    }
+    if (tapToPayStatus !== "yes") {
+      setError("This checkout cannot proceed because the customer does not have a tap-to-pay bank card for PED payment.");
+      return;
+    }
     if (!termsAccepted) {
       setError("Please accept Terms & Conditions before proceeding.");
       return;
@@ -958,6 +969,7 @@ export default function PondoCheckoutPage() {
         geoLocation: [capturedCity, capturedProvince].filter(Boolean).join(", "),
         latitude: addressValidation?.latitude ?? null,
         longitude: addressValidation?.longitude ?? null,
+        tapToPayConfirmed: tapToPayStatus === "yes",
         termsAccepted: true,
       });
       log("T&C accepted - POPIA consent captured");
@@ -1137,7 +1149,7 @@ export default function PondoCheckoutPage() {
         kycIdentityVerified: result.kycIdentityVerified,
         experianIncome: result.experianIncome,
         fraudScore: result.fraudScore,
-        approved: projectedRisk.decision === "auto_approve",
+        approved: result.approved,
         documentContext: {
           identityDocumentType,
           identityDocumentUploaded: Boolean(identityDocument),
@@ -1155,7 +1167,7 @@ export default function PondoCheckoutPage() {
         postalCode: capturedPostalCode,
       });
 
-      if (requiresKycPipelineView) {
+      if (requiresManualReviewDocuments) {
         setKycReadyToConfirm(true);
         setProcessingMessage("");
         log("Verification pipeline completed. Awaiting final order confirmation.");
@@ -1538,6 +1550,44 @@ export default function PondoCheckoutPage() {
                     </div>
                     <p className="mt-1 text-xs text-slate-500">Available delivery windows are risk-managed and verified before dispatch.</p>
                   </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+                    <div className="text-sm font-bold text-pondo-navy-900">PED Tap-to-Pay Check</div>
+                    <p className="mt-1 text-xs text-slate-600">
+                      Confirm with the customer that their bank card supports tap-to-pay/contactless payment. Orders without a tap-to-pay-enabled card should not proceed to PED checkout.
+                    </p>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {[
+                        { value: "yes" as const, label: "Yes - has tap-to-pay" },
+                        { value: "no" as const, label: "No - does not have tap-to-pay" },
+                      ].map((option) => {
+                        const active = tapToPayStatus === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setTapToPayStatus(option.value)}
+                            className={[
+                              "rounded-lg border px-3 py-2 text-sm font-semibold transition",
+                              active
+                                ? option.value === "yes"
+                                  ? "border-emerald-600 bg-emerald-600 text-white"
+                                  : "border-red-500 bg-red-500 text-white"
+                                : "border-pondo-line bg-white text-pondo-navy-900 hover:bg-[#eef3ff]",
+                            ].join(" ")}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-2 text-xs font-semibold text-slate-600">
+                      {tapToPayStatus === "yes"
+                        ? "Checkout can continue with PED collection on delivery."
+                        : tapToPayStatus === "no"
+                          ? "Do not proceed with checkout. The customer needs a tap-to-pay-enabled card for delivery payment."
+                          : "Select Yes or No before continuing."}
+                    </p>
+                  </div>
                 </div>
 
                 <div className="rounded-xl border border-pondo-line bg-pondo-surface-soft p-3">
@@ -1552,7 +1602,7 @@ export default function PondoCheckoutPage() {
                 </div>
 
                 <button onClick={onContinueToOtp} disabled={busy || addressLookupBusy || addressValidationBusy} className={primaryCtaClass}>
-                  {busy ? "Sending OTP..." : addressValidationBusy ? "Validating Address..." : requiresKycPipelineView ? "Continue to KYC Verification" : "Continue to OTP Verification"}
+                  {busy ? "Sending OTP..." : addressValidationBusy ? "Validating Address..." : "Continue to OTP Verification"}
                 </button>
               </div>
             ) : null}
@@ -1607,155 +1657,104 @@ export default function PondoCheckoutPage() {
                       <div className="mt-2 text-sm font-semibold text-emerald-700">OTP verified - identity confirmed</div>
                     ) : null}
                   </div>
-                ) : (
+                ) : isManualReview ? (
                   <div className="rounded-2xl border border-pondo-line bg-white p-6 shadow-sm">
-                    {isManualReview ? (
-                      <>
-                        <div>
-                          <h2 className="text-2xl font-extrabold text-pondo-navy-900">
-                            Please upload the requested supporting documents below
-                          </h2>
-                          <p className="mt-2 text-sm text-slate-700">
-                            Your documents are securely processed in the background.
-                          </p>
-                        </div>
+                    <>
+                      <div>
+                        <h2 className="text-2xl font-extrabold text-pondo-navy-900">
+                          Please upload the requested supporting documents below
+                        </h2>
+                        <p className="mt-2 text-sm text-slate-700">
+                          Your documents are securely processed in the background.
+                        </p>
+                      </div>
 
-                        <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
-                          <div className="grid gap-4 lg:grid-cols-2">
-                            <div className="rounded-xl border border-pondo-line bg-white p-4">
-                              <div className="text-sm font-bold text-pondo-navy-900">ID document</div>
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                {[
-                                  { id: "sa_id" as const, label: "South African ID" },
-                                  { id: "drivers_licence" as const, label: "Driver's Licence" },
-                                ].map((option) => (
-                                  <button
-                                    key={option.id}
-                                    type="button"
-                                    onClick={() => setIdentityDocumentType(option.id)}
-                                    className={[
-                                      "rounded-full border px-3 py-1.5 text-sm font-semibold transition",
-                                      identityDocumentType === option.id
-                                        ? "border-pondo-orange-500 bg-pondo-orange-500 text-white"
-                                        : "border-pondo-line bg-white text-pondo-navy-900 hover:bg-[#eef3ff]",
-                                    ].join(" ")}
-                                  >
-                                    {option.label}
-                                  </button>
-                                ))}
-                              </div>
-                              <label className="mt-4 block">
-                                <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-slate-500">Upload ID document</span>
-                                <input
-                                  type="file"
-                                  accept=".pdf,.jpg,.jpeg,.png"
-                                  onChange={async (event) => {
-                                    setIdentityDocument(await rememberSelectedDocument(event.target.files?.[0] || null));
-                                    setDocumentAnalysis(null);
-                                  }}
-                                  className="block w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-pondo-orange-500 file:px-3 file:py-2 file:font-bold file:text-white"
-                                />
-                              </label>
-                              <div className="mt-2 text-xs text-slate-500">
-                                {identityDocument
-                                  ? `Selected: ${identityDocument.fileName}`
-                                  : `Accepted formats: PDF, JPG, PNG. Use the customer's ${identityDocumentType === "sa_id" ? "ID card/book" : "driver's licence"} image or scan.`}
-                              </div>
+                      <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
+                        <div className="grid gap-4 lg:grid-cols-2">
+                          <div className="rounded-xl border border-pondo-line bg-white p-4">
+                            <div className="text-sm font-bold text-pondo-navy-900">ID document</div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {[
+                                { id: "sa_id" as const, label: "South African ID" },
+                                { id: "drivers_licence" as const, label: "Driver's Licence" },
+                              ].map((option) => (
+                                <button
+                                  key={option.id}
+                                  type="button"
+                                  onClick={() => setIdentityDocumentType(option.id)}
+                                  className={[
+                                    "rounded-full border px-3 py-1.5 text-sm font-semibold transition",
+                                    identityDocumentType === option.id
+                                      ? "border-pondo-orange-500 bg-pondo-orange-500 text-white"
+                                      : "border-pondo-line bg-white text-pondo-navy-900 hover:bg-[#eef3ff]",
+                                  ].join(" ")}
+                                >
+                                  {option.label}
+                                </button>
+                              ))}
                             </div>
-
-                            <div className="rounded-xl border border-pondo-line bg-white p-4">
-                              <div className="text-sm font-bold text-pondo-navy-900">Proof of address</div>
-                              <label className="mt-4 block">
-                                <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-slate-500">Upload proof of address</span>
-                                <input
-                                  type="file"
-                                  accept=".pdf,.jpg,.jpeg,.png"
-                                  onChange={async (event) => {
-                                    setProofOfAddressDocument(await rememberSelectedDocument(event.target.files?.[0] || null));
-                                    setDocumentAnalysis(null);
-                                  }}
-                                  className="block w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-sky-600 file:px-3 file:py-2 file:font-bold file:text-white"
-                                />
-                              </label>
-                              <div className="mt-2 text-xs text-slate-500">
-                                {proofOfAddressDocument
-                                  ? `Selected: ${proofOfAddressDocument.fileName}`
-                                  : "Examples: utility bill, bank statement, municipal letter, or lease document."}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-sm font-semibold text-pondo-navy-900">Upload progress</div>
-                              <div className="text-xs font-bold uppercase tracking-[0.08em] text-slate-500">
-                                {uploadedManualReviewDocuments}/2 received
-                              </div>
-                            </div>
-                            <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
-                              <div
-                                className="h-full rounded-full bg-emerald-500 transition-all"
-                                style={{ width: `${(uploadedManualReviewDocuments / 2) * 100}%` }}
+                            <label className="mt-4 block">
+                              <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-slate-500">Upload ID document</span>
+                              <input
+                                type="file"
+                                accept=".pdf,.jpg,.jpeg,.png"
+                                onChange={async (event) => {
+                                  setIdentityDocument(await rememberSelectedDocument(event.target.files?.[0] || null));
+                                  setDocumentAnalysis(null);
+                                }}
+                                className="block w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-pondo-orange-500 file:px-3 file:py-2 file:font-bold file:text-white"
                               />
-                            </div>
-                            <div className="mt-3 text-sm text-slate-700">
-                              {manualReviewDocumentsReady
-                                ? "Documents received - verification in progress."
-                                : "Upload both documents to continue verification."}
+                            </label>
+                            <div className="mt-2 text-xs text-slate-500">
+                              {identityDocument
+                                ? `Selected: ${identityDocument.fileName}`
+                                : `Accepted formats: PDF, JPG, PNG. Use the customer's ${identityDocumentType === "sa_id" ? "ID card/book" : "driver's licence"} image or scan.`}
                             </div>
                           </div>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                          <div>
-                            <h2 className="text-2xl font-extrabold text-pondo-navy-900">KYC Verification Pipeline</h2>
-                            <p className="mt-2 max-w-2xl text-sm text-slate-700">
-                              This order requires an additional verification step before it can be released for fulfilment.
-                            </p>
-                          </div>
-                          <div className={[
-                            "rounded-full px-4 py-2 text-xs font-black uppercase tracking-[0.08em]",
-                            "border border-amber-200 bg-amber-50 text-amber-700",
-                          ].join(" ")}>
-                            Risk Score: {projectedRisk.score}
-                            {" - "}
-                            {riskDecisionLabel(projectedRisk.decision)}
+
+                          <div className="rounded-xl border border-pondo-line bg-white p-4">
+                            <div className="text-sm font-bold text-pondo-navy-900">Proof of Address</div>
+                            <label className="mt-4 block">
+                              <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-slate-500">Upload Proof of Address</span>
+                              <input
+                                type="file"
+                                accept=".pdf,.jpg,.jpeg,.png"
+                                onChange={async (event) => {
+                                  setProofOfAddressDocument(await rememberSelectedDocument(event.target.files?.[0] || null));
+                                  setDocumentAnalysis(null);
+                                }}
+                                className="block w-full rounded-lg border border-pondo-line bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-pondo-orange-500 file:px-3 file:py-2 file:font-bold file:text-white"
+                              />
+                            </label>
+                            <div className="mt-2 text-xs text-slate-500">
+                              {proofOfAddressDocument
+                                ? `Selected: ${proofOfAddressDocument.fileName}`
+                                : "Accepted formats: PDF, JPG, PNG. Examples include a utility bill, bank statement, municipal letter, or lease document."}
+                            </div>
                           </div>
                         </div>
 
-                        <div className="mt-5 space-y-3">
-                          {[
-                            {
-                              title: "ID / Document Scan",
-                              detail: requiresManualReviewDocuments
-                                ? identityDocumentType === "sa_id"
-                                  ? "South African ID validation and supporting document capture"
-                                  : "Driver's licence capture and identity confirmation"
-                                : "South African ID validation and identity confirmation",
-                              state: requiresManualReviewDocuments ? "Pending" : isSaidValid ? "Passed" : "Pending",
-                            },
-                            {
-                              title: "Manual Review Routing",
-                              detail: "Not required for this checkout",
-                              state: "Skipped",
-                            },
-                          ].map((item) => (
-                            <div key={item.title} className="flex items-center justify-between rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3">
-                              <div className="flex items-center gap-3">
-                                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-sm font-black text-white">?</div>
-                                <div>
-                                  <div className="font-bold text-emerald-800">{item.title}</div>
-                                  <div className="text-xs text-slate-600">{item.detail}</div>
-                                </div>
-                              </div>
-                              <div className="text-xs font-black uppercase tracking-[0.08em] text-emerald-700">{item.state}</div>
+                        <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm font-semibold text-pondo-navy-900">Upload progress</div>
+                            <div className="text-xs font-bold uppercase tracking-[0.08em] text-slate-500">
+                              {uploadedManualReviewDocuments}/2 received
                             </div>
-                          ))}
+                          </div>
+                          <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
+                            <div
+                              className="h-full rounded-full bg-emerald-500 transition-all"
+                              style={{ width: `${(uploadedManualReviewDocuments / 2) * 100}%` }}
+                            />
+                          </div>
+                          <div className="mt-3 text-sm text-slate-700">
+                            {manualReviewDocumentsReady
+                              ? "Documents received - verification in progress."
+                              : "Upload both documents to continue verification."}
+                          </div>
                         </div>
-                      </>
-                    )}
+                      </div>
+                    </>
 
                     <button onClick={onConfirmVerifiedOrder} disabled={busy} className="mt-5 w-full rounded-xl bg-[#1fb782] px-4 py-3 text-lg font-black text-white shadow-[0_10px_20px_rgba(31,183,130,0.28)] hover:bg-[#19a575] disabled:opacity-60">
                       {busy
@@ -1765,7 +1764,7 @@ export default function PondoCheckoutPage() {
                           : "All Checks Passed - Confirm Order"}
                     </button>
                   </div>
-                )}
+                ) : null}
               </div>
             ) : null}
 

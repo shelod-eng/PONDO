@@ -17,6 +17,7 @@ const schema = z.object({
   geoLocation: z.string().trim().optional().default(""),
   latitude: z.number().nullable().optional(),
   longitude: z.number().nullable().optional(),
+  tapToPayConfirmed: z.boolean(),
   termsAccepted: z.literal(true),
 });
 

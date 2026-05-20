@@ -643,6 +643,7 @@ export async function confirmPondoCheckoutDetails(
     geoLocation?: string;
     latitude?: number | null;
     longitude?: number | null;
+    tapToPayConfirmed: true;
     termsAccepted: true;
   },
 ) {
