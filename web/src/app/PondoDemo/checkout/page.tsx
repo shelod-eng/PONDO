@@ -1549,44 +1549,44 @@ export default function PondoCheckoutPage() {
                       })}
                     </div>
                     <p className="mt-1 text-xs text-slate-500">Available delivery windows are risk-managed and verified before dispatch.</p>
-                  </div>
-                  <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
-                    <div className="text-sm font-bold text-pondo-navy-900">PED Tap-to-Pay Check</div>
-                    <p className="mt-1 text-xs text-slate-600">
-                      Confirm with the customer that their bank card supports tap-to-pay/contactless payment. Orders without a tap-to-pay-enabled card should not proceed to PED checkout.
-                    </p>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                      {[
-                        { value: "yes" as const, label: "Yes - has tap-to-pay" },
-                        { value: "no" as const, label: "No - does not have tap-to-pay" },
-                      ].map((option) => {
-                        const active = tapToPayStatus === option.value;
-                        return (
-                          <button
-                            key={option.value}
-                            type="button"
-                            onClick={() => setTapToPayStatus(option.value)}
-                            className={[
-                              "rounded-lg border px-3 py-2 text-sm font-semibold transition",
-                              active
-                                ? option.value === "yes"
-                                  ? "border-emerald-600 bg-emerald-600 text-white"
-                                  : "border-red-500 bg-red-500 text-white"
-                                : "border-pondo-line bg-white text-pondo-navy-900 hover:bg-[#eef3ff]",
-                            ].join(" ")}
-                          >
-                            {option.label}
-                          </button>
-                        );
-                      })}
+                    <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+                      <div className="text-sm font-bold text-pondo-navy-900">Tap-to-Pay Check</div>
+                      <p className="mt-1 text-xs text-slate-600">
+                        Does your card support tap-to-pay? If yes, you can complete your order quickly with contactless checkout.
+                      </p>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        {[
+                          { value: "yes" as const, label: "Yes, my card supports tap-to-pay" },
+                          { value: "no" as const, label: "No, I'll use another method" },
+                        ].map((option) => {
+                          const active = tapToPayStatus === option.value;
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              onClick={() => setTapToPayStatus(option.value)}
+                              className={[
+                                "rounded-lg border px-3 py-2 text-sm font-semibold transition",
+                                active
+                                  ? option.value === "yes"
+                                    ? "border-emerald-600 bg-emerald-600 text-white"
+                                    : "border-red-500 bg-red-500 text-white"
+                                  : "border-pondo-line bg-white text-pondo-navy-900 hover:bg-[#eef3ff]",
+                              ].join(" ")}
+                            >
+                              {option.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-2 text-xs font-semibold text-slate-600">
+                        {tapToPayStatus === "yes"
+                          ? "Checkout can continue with PED collection on delivery."
+                          : tapToPayStatus === "no"
+                            ? "Do not proceed with checkout. The customer needs a tap-to-pay-enabled card for delivery payment."
+                            : "Select Yes or No before continuing."}
+                      </p>
                     </div>
-                    <p className="mt-2 text-xs font-semibold text-slate-600">
-                      {tapToPayStatus === "yes"
-                        ? "Checkout can continue with PED collection on delivery."
-                        : tapToPayStatus === "no"
-                          ? "Do not proceed with checkout. The customer needs a tap-to-pay-enabled card for delivery payment."
-                          : "Select Yes or No before continuing."}
-                    </p>
                   </div>
                 </div>
 
@@ -1670,8 +1670,8 @@ export default function PondoCheckoutPage() {
                       </div>
 
                       <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
-                        <div className="grid gap-4 lg:grid-cols-2">
-                          <div className="rounded-xl border border-pondo-line bg-white p-4">
+                        <div className="grid gap-4 lg:grid-cols-2 items-stretch">
+                          <div className="flex h-full flex-col rounded-xl border border-pondo-line bg-white p-4">
                             <div className="text-sm font-bold text-pondo-navy-900">ID document</div>
                             <div className="mt-3 flex flex-wrap gap-2">
                               {[
@@ -1712,7 +1712,7 @@ export default function PondoCheckoutPage() {
                             </div>
                           </div>
 
-                          <div className="rounded-xl border border-pondo-line bg-white p-4">
+                          <div className="flex h-full flex-col rounded-xl border border-amber-200 bg-amber-50/40 p-4">
                             <div className="text-sm font-bold text-pondo-navy-900">Proof of Address</div>
                             <label className="mt-4 block">
                               <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-slate-500">Upload Proof of Address</span>
